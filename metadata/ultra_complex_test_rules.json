@@ -1,0 +1,200 @@
+[
+  {
+    "id": "system_a_ultra_complex_tos",
+    "system": "system_a",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Ultra Complex TOS: SUM(emi_amount) - SUM(transaction_amount) + SUM(penalty_amount) - SUM(charge_amount) + SUM(adjustment_amount)",
+      "source_entities": ["loan", "emi", "transaction", "penalty", "charge", "adjustment"],
+      "attributes_needed": {
+        "emi": ["loan_id", "emi_number", "emi_amount"],
+        "transaction": ["loan_id", "emi_number", "transaction_amount"],
+        "penalty": ["loan_id", "penalty_amount"],
+        "charge": ["loan_id", "charge_amount"],
+        "adjustment": ["loan_id", "adjustment_amount"]
+      },
+      "formula": "SUM(emi_amount - COALESCE(transaction_amount, 0) + COALESCE(penalty_amount, 0) - COALESCE(charge_amount, 0) + COALESCE(adjustment_amount, 0))",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_b_tos",
+    "system": "system_b",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Total Outstanding from pre-computed loan summary",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "total_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_c_tos",
+    "system": "system_c",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Total Outstanding from loan metrics (different calculation method)",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "total_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["loan_id"],
+      "source_table": "system_c_loan_metrics"
+    }
+  },
+  {
+    "id": "system_a_interest",
+    "system": "system_a",
+    "metric": "interest",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Interest Outstanding: SUM of accrued interest",
+      "source_entities": ["loan", "interest_accrual"],
+      "attributes_needed": {
+        "interest_accrual": ["loan_id", "accrued_interest"]
+      },
+      "formula": "SUM(accrued_interest)",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_b_interest",
+    "system": "system_b",
+    "metric": "interest",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Interest Outstanding from loan summary",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "interest_outstanding"]
+      },
+      "formula": "interest_outstanding",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_a_fees",
+    "system": "system_a",
+    "metric": "fees",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Fees Outstanding: SUM of fees",
+      "source_entities": ["loan", "fee"],
+      "attributes_needed": {
+        "fee": ["loan_id", "fee_amount"]
+      },
+      "formula": "SUM(fee_amount)",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_b_fees",
+    "system": "system_b",
+    "metric": "fees",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Fees Outstanding from loan summary",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "fees_outstanding"]
+      },
+      "formula": "fees_outstanding",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_d_tos",
+    "system": "system_d",
+    "metric": "tos",
+    "target_entity": "customer",
+    "target_grain": ["customer_id"],
+    "computation": {
+      "description": "Total Outstanding aggregated at customer level",
+      "source_entities": ["customer"],
+      "attributes_needed": {
+        "customer": ["customer_id", "total_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["customer_id"]
+    }
+  },
+  {
+    "id": "system_e_tos",
+    "system": "system_e",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Total Outstanding from loan summary (join required for customer_id)",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "total_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_f_tos",
+    "system": "system_f",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id", "product_type"],
+    "computation": {
+      "description": "Total Outstanding at loan and product type grain",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "product_type", "total_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["loan_id", "product_type"]
+    }
+  },
+  {
+    "id": "system_g_tos",
+    "system": "system_g",
+    "metric": "tos",
+    "target_entity": "transaction",
+    "target_grain": ["transaction_id"],
+    "computation": {
+      "description": "Total Outstanding at transaction level (multi-level aggregation test)",
+      "source_entities": ["transaction"],
+      "attributes_needed": {
+        "transaction": ["transaction_id", "loan_id", "tos_contribution"]
+      },
+      "formula": "tos_contribution",
+      "aggregation_grain": ["transaction_id"]
+    }
+  },
+  {
+    "id": "system_h_tos",
+    "system": "system_h",
+    "metric": "tos",
+    "target_entity": "customer",
+    "target_grain": ["customer_id"],
+    "computation": {
+      "description": "Total Outstanding at customer level (deep join chain test)",
+      "source_entities": ["customer"],
+      "attributes_needed": {
+        "customer": ["customer_id", "total_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["customer_id"]
+    }
+  }
+]
+

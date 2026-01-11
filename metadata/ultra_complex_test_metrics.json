@@ -1,0 +1,45 @@
+[
+  {
+    "id": "tos",
+    "name": "Total Outstanding",
+    "description": "Total outstanding amount across all loans",
+    "grain": ["loan_id"],
+    "precision": 2,
+    "null_policy": "zero",
+    "unit": "currency",
+    "versions": [
+      {
+        "version": "v1",
+        "description": "Standard TOS calculation"
+      }
+    ]
+  },
+  {
+    "id": "pos",
+    "name": "Principal Outstanding",
+    "description": "Principal amount outstanding",
+    "grain": ["loan_id"],
+    "precision": 2,
+    "null_policy": "zero",
+    "unit": "currency"
+  },
+  {
+    "id": "interest",
+    "name": "Interest Outstanding",
+    "description": "Accrued interest outstanding",
+    "grain": ["loan_id"],
+    "precision": 2,
+    "null_policy": "zero",
+    "unit": "currency"
+  },
+  {
+    "id": "fees",
+    "name": "Fees Outstanding",
+    "description": "Fees amount outstanding",
+    "grain": ["loan_id"],
+    "precision": 2,
+    "null_policy": "zero",
+    "unit": "currency"
+  }
+]
+

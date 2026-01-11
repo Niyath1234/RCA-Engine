@@ -65,11 +65,31 @@ impl RuleCompiler {
         }
         
         // Step 2: Determine root table (usually the target entity's table)
+        // Prefer table that has the required columns from the formula
         let root_entity = &rule.target_entity;
         let root_tables = entity_to_tables.get(root_entity)
             .ok_or_else(|| RcaError::Execution(format!("No tables for root entity: {}", root_entity)))?;
-        let root_table = root_tables.first()
-            .ok_or_else(|| RcaError::Execution(format!("No root table found for entity: {}", root_entity)))?;
+        
+        // If formula is a direct column reference, prefer table that has that column
+        let root_table = if !rule.computation.formula.contains("SUM(") && 
+                             !rule.computation.formula.contains("AVG(") &&
+                             !rule.computation.formula.contains("COUNT(") {
+            // Direct column reference - find table that likely has this column
+            let formula_col = rule.computation.formula.split_whitespace().next().unwrap_or("");
+            root_tables.iter()
+                .find(|t| {
+                    // Prefer tables with names that suggest they contain summary/precomputed data
+                    // if the column name suggests it's a summary metric
+                    (formula_col.contains("total") || formula_col.contains("summary") || formula_col.contains("outstanding")) &&
+                    (t.name.contains("summary") || t.name.contains("total") || t.name.contains("outstanding") || 
+                     t.name.contains("metrics") || t.name.contains("details"))
+                })
+                .or_else(|| root_tables.first())
+                .ok_or_else(|| RcaError::Execution(format!("No root table found for entity: {}", root_entity)))?
+        } else {
+            root_tables.first()
+                .ok_or_else(|| RcaError::Execution(format!("No root table found for entity: {}", root_entity)))?
+        };
         
         // Step 3: Build join plan - find shortest paths from root to all other entity tables
         let mut visited_tables = HashSet::new();

@@ -1,0 +1,331 @@
+[
+  {
+    "type": "edge",
+    "from": "system_a_customers",
+    "to": "system_a_loans",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_emis",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_emis",
+    "to": "system_a_transactions",
+    "keys": {
+      "loan_id": "loan_id",
+      "emi_number": "emi_number"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_penalties",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_charges",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_adjustments",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_interest_accruals",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_fees",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_loan_status_history",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_b_loans",
+    "to": "system_b_loan_summary",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_one"
+  },
+  {
+    "type": "edge",
+    "from": "system_b_loans",
+    "to": "system_b_interest_details",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_b_loans",
+    "to": "system_b_fee_details",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_c_loans",
+    "to": "system_c_loan_metrics",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_one"
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_a_loans", "system_b_loans"],
+    "keys": {
+      "loan_id": "loan_id"
+    }
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_a_loans", "system_c_loans"],
+    "keys": {
+      "loan_id": "loan_id"
+    }
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_b_loans", "system_c_loans"],
+    "keys": {
+      "loan_id": "loan_id"
+    }
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_customers",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "many_to_one"
+  },
+  {
+    "type": "edge",
+    "from": "system_b_loans",
+    "to": "system_a_customers",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "many_to_one"
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_a_loans", "system_d_customer_summary"],
+    "keys": {
+      "customer_id": "customer_id"
+    }
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_b_loans", "system_d_customer_summary"],
+    "keys": {
+      "customer_id": "customer_id"
+    }
+  },
+  {
+    "type": "edge",
+    "from": "system_e_loans",
+    "to": "system_e_loan_customers",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_e_loan_customers",
+    "to": "system_a_customers",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "many_to_one"
+  },
+  {
+    "type": "edge",
+    "from": "system_e_loans",
+    "to": "system_e_loan_summary",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_one"
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_e_loan_customers", "system_d_customer_summary"],
+    "keys": {
+      "customer_id": "customer_id"
+    }
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_f_loans", "system_b_loans"],
+    "keys": {
+      "loan_id": "loan_id"
+    }
+  },
+  {
+    "type": "edge",
+    "from": "system_g_transactions",
+    "to": "system_g_loans",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "many_to_one"
+  },
+  {
+    "type": "edge",
+    "from": "system_g_loans",
+    "to": "system_a_customers",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "many_to_one"
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_g_transactions", "system_g_loans"],
+    "keys": {
+      "loan_id": "loan_id"
+    }
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_g_loans", "system_d_customer_summary"],
+    "keys": {
+      "customer_id": "customer_id"
+    }
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_customers",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "many_to_one"
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_g_transactions", "system_a_loans"],
+    "keys": {
+      "loan_id": "loan_id"
+    }
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_g_transactions", "system_d_customer_summary"],
+    "keys": {
+      "customer_id": "customer_id"
+    }
+  },
+  {
+    "type": "edge",
+    "from": "system_h_customers",
+    "to": "system_h_accounts",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_h_accounts",
+    "to": "system_h_loans",
+    "keys": {
+      "account_id": "account_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_h_loans",
+    "to": "system_h_emis",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_h_emis",
+    "to": "system_h_transactions",
+    "keys": {
+      "emi_id": "emi_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_h_transactions",
+    "to": "system_h_payments",
+    "keys": {
+      "transaction_id": "transaction_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_h_customers",
+    "to": "system_h_customer_summary",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "one_to_one"
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_h_customers", "system_d_customer_summary"],
+    "keys": {
+      "customer_id": "customer_id"
+    }
+  }
+]
+

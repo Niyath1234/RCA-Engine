@@ -20,6 +20,17 @@ pub struct Table {
     pub time_column: String,
     pub system: String,
     pub path: String,
+    #[serde(default)]
+    pub columns: Option<Vec<ColumnMetadata>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnMetadata {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub data_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

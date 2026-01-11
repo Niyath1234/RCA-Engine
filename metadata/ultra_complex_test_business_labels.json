@@ -1,0 +1,79 @@
+[
+  {
+    "type": "system",
+    "label": "System A",
+    "aliases": ["system_a", "sa", "systema"],
+    "system_id": "system_a"
+  },
+  {
+    "type": "system",
+    "label": "System B",
+    "aliases": ["system_b", "sb", "systemb"],
+    "system_id": "system_b"
+  },
+  {
+    "type": "system",
+    "label": "System C",
+    "aliases": ["system_c", "sc", "systemc"],
+    "system_id": "system_c"
+  },
+  {
+    "type": "system",
+    "label": "System D",
+    "aliases": ["system_d", "sd", "systemd"],
+    "system_id": "system_d"
+  },
+  {
+    "type": "system",
+    "label": "System E",
+    "aliases": ["system_e", "se", "systeme"],
+    "system_id": "system_e"
+  },
+  {
+    "type": "system",
+    "label": "System F",
+    "aliases": ["system_f", "sf", "systemf"],
+    "system_id": "system_f"
+  },
+  {
+    "type": "system",
+    "label": "System G",
+    "aliases": ["system_g", "sg", "systemg"],
+    "system_id": "system_g"
+  },
+  {
+    "type": "system",
+    "label": "System H",
+    "aliases": ["system_h", "sh", "systemh"],
+    "system_id": "system_h"
+  },
+  {
+    "type": "metric",
+    "label": "TOS",
+    "aliases": ["tos", "total outstanding", "total outstanding amount"],
+    "metric_id": "tos"
+  },
+  {
+    "type": "metric",
+    "label": "Interest",
+    "aliases": ["interest", "interest outstanding", "accrued interest"],
+    "metric_id": "interest"
+  },
+  {
+    "type": "metric",
+    "label": "Fees",
+    "aliases": ["fees", "fees outstanding", "fee amount"],
+    "metric_id": "fees"
+  },
+  {
+    "type": "reconciliation_type",
+    "label": "reconciliation",
+    "aliases": ["recon", "reconcile", "compare", "match"]
+  },
+  {
+    "type": "reconciliation_type",
+    "label": "as of",
+    "aliases": ["as-of", "asof", "as of date", "snapshot"]
+  }
+]
+

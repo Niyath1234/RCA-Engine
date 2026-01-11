@@ -1,0 +1,94 @@
+[
+  {
+    "id": "customer",
+    "name": "Customer",
+    "description": "Customer entity",
+    "grain": ["customer_id"],
+    "attributes": ["customer_id", "name", "registration_date", "credit_score"]
+  },
+  {
+    "id": "loan",
+    "name": "Loan",
+    "description": "Loan entity",
+    "grain": ["loan_id"],
+    "attributes": ["loan_id", "customer_id", "disbursement_date", "principal_amount", "interest_rate", "tenure_months"]
+  },
+  {
+    "id": "emi",
+    "name": "EMI",
+    "description": "Equated Monthly Installment",
+    "grain": ["loan_id", "emi_number"],
+    "attributes": ["emi_id", "loan_id", "emi_number", "due_date", "emi_amount", "principal_component", "interest_component"]
+  },
+  {
+    "id": "transaction",
+    "name": "Transaction",
+    "description": "Financial transaction",
+    "grain": ["transaction_id"],
+    "attributes": ["transaction_id", "loan_id", "emi_id", "emi_number", "transaction_amount", "transaction_date", "payment_method", "tos_contribution"]
+  },
+  {
+    "id": "penalty",
+    "name": "Penalty",
+    "description": "Penalty charge",
+    "grain": ["penalty_id"],
+    "attributes": ["penalty_id", "loan_id", "penalty_amount", "penalty_date", "penalty_reason"]
+  },
+  {
+    "id": "charge",
+    "name": "Charge",
+    "description": "Additional charge",
+    "grain": ["charge_id"],
+    "attributes": ["charge_id", "loan_id", "charge_amount", "charge_date", "charge_type"]
+  },
+  {
+    "id": "adjustment",
+    "name": "Adjustment",
+    "description": "Adjustment record",
+    "grain": ["adjustment_id"],
+    "attributes": ["adjustment_id", "loan_id", "adjustment_amount", "adjustment_date", "adjustment_type"]
+  },
+  {
+    "id": "interest_accrual",
+    "name": "Interest Accrual",
+    "description": "Interest accrual record",
+    "grain": ["accrual_id"],
+    "attributes": ["accrual_id", "loan_id", "accrued_interest", "accrual_date", "accrual_period"]
+  },
+  {
+    "id": "fee",
+    "name": "Fee",
+    "description": "Fee record",
+    "grain": ["fee_id"],
+    "attributes": ["fee_id", "loan_id", "fee_amount", "fee_date", "fee_type"]
+  },
+  {
+    "id": "loan_status",
+    "name": "Loan Status",
+    "description": "Loan status history",
+    "grain": ["status_id"],
+    "attributes": ["status_id", "loan_id", "status", "status_date"]
+  },
+  {
+    "id": "loan_customer",
+    "name": "Loan Customer",
+    "description": "Mapping between loans and customers (for join path discovery)",
+    "grain": ["loan_id", "customer_id"],
+    "attributes": ["loan_id", "customer_id", "relationship_type"]
+  },
+  {
+    "id": "account",
+    "name": "Account",
+    "description": "Customer account entity (for deep join chain)",
+    "grain": ["account_id"],
+    "attributes": ["account_id", "customer_id", "account_type", "opening_date"]
+  },
+  {
+    "id": "payment",
+    "name": "Payment",
+    "description": "Payment record (deepest level in join chain)",
+    "grain": ["payment_id"],
+    "attributes": ["payment_id", "transaction_id", "payment_date", "payment_amount", "payment_status"]
+  }
+]
+

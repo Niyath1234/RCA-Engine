@@ -15,6 +15,12 @@
     ]
   },
   {
+    "type": "canonical_key",
+    "entity": "customer",
+    "canonical": "customer_id",
+    "alternates": []
+  },
+  {
     "type": "key_mapping",
     "from_system": "khatabook",
     "to_system": "tb",

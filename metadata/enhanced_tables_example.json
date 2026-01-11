@@ -1,0 +1,87 @@
+{
+  "tables": [
+    {
+      "name": "khatabook_loans",
+      "entity": "loan",
+      "primary_key": ["loan_id"],
+      "time_column": "disbursement_date",
+      "system": "khatabook",
+      "path": "khatabook/loans.parquet",
+      "columns": [
+        {
+          "name": "loan_id",
+          "description": "Unique identifier for the loan"
+        },
+        {
+          "name": "customer_id",
+          "description": "Customer who took the loan"
+        },
+        {
+          "name": "principal_amount",
+          "description": "Original loan amount disbursed"
+        },
+        {
+          "name": "disbursement_date",
+          "description": "Date when loan was disbursed"
+        }
+      ]
+    },
+    {
+      "name": "khatabook_emis",
+      "entity": "emi",
+      "primary_key": ["loan_id", "emi_number"],
+      "time_column": "due_date",
+      "system": "khatabook",
+      "path": "khatabook/emis.parquet",
+      "columns": [
+        {
+          "name": "loan_id",
+          "description": "Loan this EMI belongs to"
+        },
+        {
+          "name": "emi_number",
+          "description": "EMI installment number"
+        },
+        {
+          "name": "emi_amount",
+          "description": "Amount due for this EMI"
+        },
+        {
+          "name": "due_date",
+          "description": "Date when EMI is due"
+        }
+      ]
+    },
+    {
+      "name": "khatabook_transactions",
+      "entity": "transaction",
+      "primary_key": ["transaction_id"],
+      "time_column": "transaction_date",
+      "system": "khatabook",
+      "path": "khatabook/transactions.parquet",
+      "columns": [
+        {
+          "name": "transaction_id",
+          "description": "Unique transaction identifier"
+        },
+        {
+          "name": "loan_id",
+          "description": "Loan this transaction is for"
+        },
+        {
+          "name": "emi_number",
+          "description": "EMI number this transaction pays"
+        },
+        {
+          "name": "transaction_amount",
+          "description": "Amount paid in this transaction"
+        },
+        {
+          "name": "transaction_date",
+          "description": "Date of the transaction"
+        }
+      ]
+    }
+  ]
+}
+

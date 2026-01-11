@@ -1,0 +1,101 @@
+{
+  "tables": [
+    {
+      "name": "system_a_customers",
+      "entity": "customer",
+      "primary_key": ["customer_id"],
+      "time_column": "created_date",
+      "system": "system_a",
+      "path": "system_a/customers.parquet"
+    },
+    {
+      "name": "system_a_loans",
+      "entity": "loan",
+      "primary_key": ["loan_id"],
+      "time_column": "disbursement_date",
+      "system": "system_a",
+      "path": "system_a/loans.parquet"
+    },
+    {
+      "name": "system_a_loan_details",
+      "entity": "loan_detail",
+      "primary_key": ["loan_id", "detail_id"],
+      "time_column": "update_date",
+      "system": "system_a",
+      "path": "system_a/loan_details.parquet"
+    },
+    {
+      "name": "system_a_emis",
+      "entity": "emi",
+      "primary_key": ["loan_id", "emi_number"],
+      "time_column": "due_date",
+      "system": "system_a",
+      "path": "system_a/emis.parquet"
+    },
+    {
+      "name": "system_a_transactions",
+      "entity": "transaction",
+      "primary_key": ["transaction_id"],
+      "time_column": "transaction_date",
+      "system": "system_a",
+      "path": "system_a/transactions.parquet"
+    },
+    {
+      "name": "system_a_payments",
+      "entity": "payment",
+      "primary_key": ["payment_id"],
+      "time_column": "payment_date",
+      "system": "system_a",
+      "path": "system_a/payments.parquet"
+    },
+    {
+      "name": "system_a_penalties",
+      "entity": "penalty",
+      "primary_key": ["penalty_id"],
+      "time_column": "penalty_date",
+      "system": "system_a",
+      "path": "system_a/penalties.parquet"
+    },
+    {
+      "name": "system_a_charges",
+      "entity": "charge",
+      "primary_key": ["charge_id"],
+      "time_column": "charge_date",
+      "system": "system_a",
+      "path": "system_a/charges.parquet"
+    },
+    {
+      "name": "system_a_refunds",
+      "entity": "refund",
+      "primary_key": ["refund_id"],
+      "time_column": "refund_date",
+      "system": "system_a",
+      "path": "system_a/refunds.parquet"
+    },
+    {
+      "name": "system_a_adjustments",
+      "entity": "adjustment",
+      "primary_key": ["adjustment_id"],
+      "time_column": "adjustment_date",
+      "system": "system_a",
+      "path": "system_a/adjustments.parquet"
+    },
+    {
+      "name": "system_b_loans",
+      "entity": "loan",
+      "primary_key": ["loan_id"],
+      "time_column": "disbursement_date",
+      "system": "system_b",
+      "path": "system_b/loans.parquet"
+    },
+    {
+      "name": "system_b_loan_summary",
+      "entity": "loan",
+      "primary_key": ["loan_id"],
+      "time_column": "as_of_date",
+      "system": "system_b",
+      "path": "system_b/loan_summary.parquet"
+    }
+  ]
+}
+
