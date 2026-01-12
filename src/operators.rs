@@ -84,10 +84,23 @@ impl RelationalEngine {
             return Err(RcaError::Execution(format!("Table file not found: {}", path.display())));
         }
         
-        let df = LazyFrame::scan_parquet(&path, ScanArgsParquet::default())
-            .map_err(|e| RcaError::Execution(format!("Failed to scan {}: {}", table_name, e)))?
-            .collect()
-            .map_err(|e| RcaError::Execution(format!("Failed to collect {}: {}", table_name, e)))?;
+        // Load based on file extension
+        let df = if path.extension().and_then(|s| s.to_str()) == Some("csv") {
+            // Load CSV file
+            LazyCsvReader::new(&path)
+                .with_try_parse_dates(true)
+                .with_infer_schema_length(Some(1000))
+                .finish()
+                .map_err(|e| RcaError::Execution(format!("Failed to scan CSV {}: {}", table_name, e)))?
+                .collect()
+                .map_err(|e| RcaError::Execution(format!("Failed to collect CSV {}: {}", table_name, e)))?
+        } else {
+            // Load Parquet file (default)
+            LazyFrame::scan_parquet(&path, ScanArgsParquet::default())
+                .map_err(|e| RcaError::Execution(format!("Failed to scan {}: {}", table_name, e)))?
+                .collect()
+                .map_err(|e| RcaError::Execution(format!("Failed to collect {}: {}", table_name, e)))?
+        };
         
         // Convert any string columns containing scientific notation to numeric
         let df = data_utils::convert_scientific_notation_columns(df)?;
@@ -162,9 +175,9 @@ impl RelationalEngine {
             .collect()
             .map_err(|e| RcaError::Execution(format!("Join failed: {}", e)))?;
         
-        // Check for join explosion
+        // Check for join explosion - increased threshold for multi-grain scenarios
         let row_count_after = result.height();
-        if row_count_after > row_count_before * 10 {
+        if row_count_after > row_count_before * 50 {
             return Err(RcaError::Execution(format!(
                 "Join explosion detected: {} rows -> {} rows",
                 row_count_before, row_count_after

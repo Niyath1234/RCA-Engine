@@ -1,35 +1,53 @@
 [
   {
-    "id": "khatabook_tos",
-    "system": "khatabook",
-    "metric": "tos",
+    "id": "collections_mis_paid_extraction",
+    "system": "collections_mis",
+    "metric": "paid_amount",
     "target_entity": "loan",
-    "target_grain": ["loan_id"],
+    "target_grain": ["uuid"],
     "computation": {
-      "description": "Total Outstanding = Sum of (EMI Amount - Transaction Amount) per loan",
-      "source_entities": ["loan", "emi", "transaction"],
+      "description": "Collections MIS business rules",
+      "source_entities": ["loan"],
+      "source_table": "collections_mis",
       "attributes_needed": {
-        "emi": ["loan_id", "emi_number", "amount"],
-        "transaction": ["loan_id", "emi_number", "amount"]
+        "loan": ["uuid", "paid_date", "paid_amount"]
       },
-      "formula": "SUM(emi_amount - COALESCE(transaction_amount, 0))",
-      "aggregation_grain": ["loan_id"]
+      "formula": "paid_amount",
+      "aggregation_grain": ["uuid"],
+      "filter_conditions": {
+        "mis_date": "2026-01-08",
+        "paid_date": "IS NOT NULL",
+        "paid_amount": "IS NOT NULL"
+      },
+      "note": "Date snapshot: 2026-01-08. Data quality: Must have paid_date and paid_amount."
     }
   },
   {
-    "id": "tb_tos",
-    "system": "tb",
-    "metric": "tos",
+    "id": "outstanding_daily_paid_extraction",
+    "system": "outstanding_daily",
+    "metric": "paid_amount",
     "target_entity": "loan",
-    "target_grain": ["loan_id"],
+    "target_grain": ["uuid"],
     "computation": {
-      "description": "Total Outstanding from pre-computed loan summary",
-      "source_entities": ["loan"],
+      "description": "Outstanding daily business rules",
+      "source_entities": ["loan", "repayment"],
+      "source_table": "outstanding_daily",
       "attributes_needed": {
-        "loan": ["loan_id", "total_outstanding"]
+        "loan": ["uuid", "order_id"],
+        "repayment": ["order_id", "repay_id", "paid_date", "paid_amount"]
       },
-      "formula": "total_outstanding",
-      "aggregation_grain": ["loan_id"]
+      "formula": "paid_amount",
+      "aggregation_grain": ["uuid"],
+      "filter_conditions": {
+        "last_day": "2026-01-07",
+        "repayments.status": "SUCCESS",
+        "repayments.__is_deleted": "false",
+        "emi_payment_view.is_deleted": "false",
+        "outstanding_daily.settlement_flag": "unsettled",
+        "nbfc": "quadrillion, slicenesfb, nesfb",
+        "order_type": "NOT credin"
+      },
+      "note": "Date snapshot: 2026-01-07. Business filters: Only successful repayments, exclude deleted records, only unsettled loans, specific NBFCs only, exclude credin orders."
     }
   }
 ]

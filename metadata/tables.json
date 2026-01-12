@@ -39,7 +39,60 @@
       "time_column": "as_of_date",
       "system": "tb",
       "path": "tb/loan_summary.parquet"
+    },
+    {
+      "name": "scf_v1_loans",
+      "entity": "loan",
+      "primary_key": ["loan_account_id"],
+      "time_column": "reportdate",
+      "system": "scf_v1",
+      "path": "scf_v1/scf_loans.csv"
+    },
+    {
+      "name": "scf_v2_loans",
+      "entity": "loan",
+      "primary_key": ["loan_account_id"],
+      "time_column": "reportdate",
+      "system": "scf_v2",
+      "path": "scf_v2/scf_loans.csv"
+    },
+    {
+      "name": "collections_mis",
+      "entity": "loan",
+      "primary_key": ["uuid", "mis_date"],
+      "time_column": "mis_date",
+      "system": "collections_mis",
+      "path": "collections_mis/current_month_collections_mis.csv",
+      "description": "Collections MIS table with payment information"
+    },
+    {
+      "name": "outstanding_daily",
+      "entity": "loan",
+      "primary_key": ["order_id", "last_day"],
+      "time_column": "last_day",
+      "system": "outstanding_daily",
+      "path": "outstanding_daily/outstanding_daily.csv",
+      "description": "Outstanding daily loan information"
+    },
+    {
+      "name": "repayments",
+      "entity": "repayment",
+      "primary_key": ["repay_id"],
+      "time_column": "created_at",
+      "system": "outstanding_daily",
+      "path": "repayments/repayments.csv",
+      "description": "Repayment records"
+    },
+    {
+      "name": "emi_payment_view",
+      "entity": "repayment",
+      "primary_key": ["repayment_txn_id"],
+      "time_column": "created_at",
+      "system": "outstanding_daily",
+      "path": "emi_payments/emi_payment_view.csv",
+      "description": "EMI payment view with paid date and amount"
     }
   ]
 }
+
 

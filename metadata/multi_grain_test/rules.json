@@ -1,0 +1,41 @@
+[
+  {
+    "id": "system_a_multi_grain_tos",
+    "system": "system_a",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Multi-grain TOS calculation requiring aggregations across different grain levels: loan_id+date (interest/fees/penalties), loan_id+emi_number (EMIs/transactions), loan_id+date+type (adjustments)",
+      "source_entities": ["loan", "emi", "transaction", "interest_accrual", "fee", "penalty"],
+      "attributes_needed": {
+        "emi": ["loan_id", "emi_number", "emi_amount"],
+        "transaction": ["loan_id", "emi_number", "transaction_date", "transaction_amount", "transaction_type"],
+        "interest_accrual": ["loan_id", "accrual_date", "accrued_interest"],
+        "fee": ["loan_id", "fee_date", "fee_amount"],
+        "penalty": ["loan_id", "penalty_date", "penalty_amount"],
+        "adjustment": ["loan_id", "transaction_date", "transaction_type", "transaction_amount"]
+      },
+      "formula": "SUM(COALESCE(emi_amount, 0)) - SUM(CASE WHEN transaction_type = 'EMI_PAYMENT' THEN COALESCE(transaction_amount, 0) ELSE 0 END) + SUM(COALESCE(accrued_interest, 0)) + SUM(COALESCE(penalty_amount, 0)) + SUM(CASE WHEN transaction_type = 'ADJUSTMENT' THEN COALESCE(transaction_amount, 0) ELSE 0 END) - SUM(COALESCE(fee_amount, 0))",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_b_tos",
+    "system": "system_b",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Pre-aggregated TOS from loan summary",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "total_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["loan_id"],
+      "source_table": "loan_summary"
+    }
+  }
+]
+

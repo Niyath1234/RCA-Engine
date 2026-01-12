@@ -31,6 +31,28 @@ pub enum RcaError {
     
     #[error("Polars error: {0}")]
     Polars(String),
+    
+    // New failure types for one-shot agentic system
+    #[error("Ambiguous intent: {0}")]
+    AmbiguousIntent(String),
+    
+    #[error("Unresolvable path: {0}")]
+    UnresolvablePath(String),
+    
+    #[error("Invalid constraint: {0}")]
+    InvalidConstraint(String),
+    
+    #[error("Dangerous plan: {0}")]
+    DangerousPlan(String),
+    
+    #[error("Data too large: {0}")]
+    DataTooLarge(String),
+    
+    #[error("Missing metadata: {0}")]
+    MissingMetadata(String),
+    
+    #[error("Safety guardrail triggered: {0}")]
+    SafetyGuardrail(String),
 }
 
 impl From<polars::error::PolarsError> for RcaError {
@@ -40,4 +62,5 @@ impl From<polars::error::PolarsError> for RcaError {
 }
 
 pub type Result<T> = std::result::Result<T, RcaError>;
+
 

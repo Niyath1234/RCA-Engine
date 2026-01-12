@@ -57,12 +57,16 @@ impl IntelligentRuleBuilder {
             target_entity: target_entity.to_string(),
             target_grain: vec!["loan_id".to_string()], // Default, should be inferred
             computation: ComputationDefinition {
+                filter_conditions: None,
+                source_table: None,
+                note: None,
                 description: format!("{}: {}", metric, business_rule),
                 source_entities,
                 attributes_needed,
                 formula: resolved_formula,
                 aggregation_grain: vec!["loan_id".to_string()], // Default
             },
+            labels: None,
         };
         
         println!("   ✅ Rule built successfully!");

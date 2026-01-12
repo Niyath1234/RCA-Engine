@@ -519,11 +519,46 @@ impl RcaEngine {
         
         let divergence = if !mismatched_keys.is_empty() {
             println!("   🔍 Finding divergence points...");
-            let drilldown = DrilldownEngine::new(executor);
-            let div = drilldown.find_divergence(&rule_a_id, &rule_b_id, &mismatched_keys, as_of_date).await?;
+            let mut drilldown = DrilldownEngine::new(executor)
+                .with_llm(self.llm.clone())
+                .with_metadata(self.metadata.clone())
+                .with_data_dir(self.data_dir.clone());
+            
+            let mut div = drilldown.find_divergence(&rule_a_id, &rule_b_id, &mismatched_keys, as_of_date).await?;
             println!("   ✅ Divergence Found:");
             println!("      - Step Index: {}", div.step_index);
             println!("      - Divergence Type: {}", div.divergence_type);
+            
+            // Step 12.5: Analyze root causes with LLM to identify specific issues
+            println!("\n   🤖 Analyzing root causes with LLM...");
+            match drilldown.analyze_root_causes(&rule_a_id, &rule_b_id, &mismatched_keys, as_of_date).await {
+                Ok(root_causes) => {
+                    if !root_causes.is_empty() {
+                        println!("   ✅ Root Cause Analysis Complete:");
+                        for (idx, root_cause) in root_causes.iter().enumerate() {
+                            println!("      {}. Loan {}: Difference of {:.2}", 
+                                idx + 1, root_cause.loan_id, root_cause.difference);
+                            println!("         System A: {:.2} | System B: {:.2}", 
+                                root_cause.system_a_value, root_cause.system_b_value);
+                            
+                            if !root_cause.specific_issues.is_empty() {
+                                println!("         🔍 Specific Issues Identified:");
+                                for issue in &root_cause.specific_issues {
+                                    println!("            • {}", issue);
+                                }
+                            }
+                        }
+                        div.root_cause_details = Some(root_causes);
+                    } else {
+                        println!("   ℹ️  No specific root causes identified");
+                    }
+                }
+                Err(e) => {
+                    println!("   ⚠️  Root cause analysis failed: {}", e);
+                    println!("   ℹ️  Continuing with divergence point only");
+                }
+            }
+            
             Some(div)
         } else {
             None
@@ -652,10 +687,21 @@ impl RcaEngine {
                 continue;
             }
             
-            // Try to read the parquet file
-            if let Ok(mut table_df) = LazyFrame::scan_parquet(&table_path, ScanArgsParquet::default())
-                .and_then(|lf| lf.collect())
-            {
+            // Try to read the file (CSV or Parquet based on extension)
+            let table_df_result = if table_path.extension().and_then(|s| s.to_str()) == Some("csv") {
+                // Load CSV file
+                LazyCsvReader::new(&table_path)
+                    .with_try_parse_dates(true)
+                    .with_infer_schema_length(Some(1000))
+                    .finish()
+                    .and_then(|lf| lf.collect())
+            } else {
+                // Load Parquet file (default)
+                LazyFrame::scan_parquet(&table_path, ScanArgsParquet::default())
+                    .and_then(|lf| lf.collect())
+            };
+            
+            if let Ok(mut table_df) = table_df_result {
                 // Convert any string columns containing scientific notation to numeric
                 table_df = data_utils::convert_scientific_notation_columns(table_df)?;
                 // Check if table has all grain columns
@@ -928,6 +974,33 @@ impl std::fmt::Display for RcaResult {
         if let Some(divergence) = &self.divergence {
             writeln!(f, "\n=== Divergence Point ===")?;
             writeln!(f, "Step: {} | Type: {}", divergence.step_index, divergence.divergence_type)?;
+            
+            // Display LLM-generated root cause details
+            if let Some(ref root_causes) = divergence.root_cause_details {
+                if !root_causes.is_empty() {
+                    writeln!(f, "\n=== Root Cause Analysis (LLM-Generated) ===")?;
+                    for (idx, root_cause) in root_causes.iter().enumerate() {
+                        writeln!(f, "\n{}. Entity: {}", idx + 1, root_cause.loan_id)?;
+                        writeln!(f, "   System A Value: {:.2}", root_cause.system_a_value)?;
+                        writeln!(f, "   System B Value: {:.2}", root_cause.system_b_value)?;
+                        writeln!(f, "   Difference: {:.2}", root_cause.difference)?;
+                        
+                        if !root_cause.specific_issues.is_empty() {
+                            writeln!(f, "   Specific Issues Identified:")?;
+                            for issue in &root_cause.specific_issues {
+                                writeln!(f, "      • {}", issue)?;
+                            }
+                        }
+                        
+                        if !root_cause.table_contributions.is_empty() {
+                            writeln!(f, "   Table Contributions:")?;
+                            for (table, contribution) in &root_cause.table_contributions {
+                                writeln!(f, "      - {}: {:.2}", table, contribution)?;
+                            }
+                        }
+                    }
+                }
+            }
         }
         
         Ok(())

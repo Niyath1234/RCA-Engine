@@ -1,0 +1,14 @@
+repay_id,order_id,user_uuid,status,__is_deleted,created_at
+repay-001,order-001,uuid-001,SUCCESS,false,2026-01-08 10:30:00
+repay-002,order-002,uuid-002,SUCCESS,false,2026-01-07 14:20:00
+repay-003,order-003,uuid-003,SUCCESS,false,2026-01-08 09:15:00
+repay-004,order-004,uuid-004,SUCCESS,false,2026-01-06 16:45:00
+repay-005,order-005,uuid-005,SUCCESS,false,2026-01-08 11:00:00
+repay-006,order-006,uuid-006,PENDING,false,2026-01-07 13:30:00
+repay-007,order-007,uuid-007,SUCCESS,false,2026-01-07 15:20:00
+repay-008,order-008,uuid-008,SUCCESS,false,2026-01-08 10:45:00
+repay-009,order-009,uuid-009,SUCCESS,false,2026-01-05 12:00:00
+repay-010,order-010,uuid-010,SUCCESS,false,2026-01-08 09:30:00
+repay-011,order-001,uuid-001,FAILED,false,2026-01-07 08:00:00
+repay-012,order-002,uuid-002,SUCCESS,true,2026-01-06 10:00:00
+

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "tos",
+    "name": "Total Outstanding",
+    "description": "Total outstanding balance",
+    "grain": ["loan_id"],
+    "precision": 2,
+    "null_policy": "zero",
+    "unit": "currency"
+  }
+]
+

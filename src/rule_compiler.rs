@@ -122,6 +122,8 @@ impl RuleCompiler {
                         let join_type = self.determine_join_type(&join_step.from, &join_step.to)?;
                         let join_keys: Vec<String> = join_step.keys.keys().cloned().collect();
                         
+                        // Note: Aggregation will be handled inline during join execution
+                        // if the table grain is higher than target grain
                         steps.push(PipelineOp::Join {
                             table: join_step.to.clone(),
                             on: join_keys,
@@ -303,6 +305,72 @@ impl RuleCompiler {
         // Default to left join if relationship not specified
         Ok("left".to_string())
     }
+    
+    /// Check if a table needs to be aggregated before joining
+    /// Returns true if the table's grain (primary_key) is significantly higher (more granular) than the target grain
+    /// We only aggregate tables that are at a much higher grain (like date-level) to avoid join explosions
+    /// Tables that are close to target grain (like loan_id + emi_number) should be joined first, then aggregated
+    fn table_needs_aggregation(&self, table: &Table, target_grain: &[String]) -> bool {
+        // Use primary_key as proxy for grain (grain is often same as primary_key)
+        let table_grain = &table.primary_key;
+        
+        // If table grain has significantly more elements than target grain (3+ more), it needs aggregation
+        // This catches date-level tables like loan_id + date + type
+        if table_grain.len() >= target_grain.len() + 2 {
+            return true;
+        }
+        
+        // If table grain has 1-2 more elements, check if the extra columns are date-related
+        // Date-related tables should be aggregated before joining to avoid explosion
+        if table_grain.len() > target_grain.len() {
+            let extra_cols: Vec<_> = table_grain.iter()
+                .filter(|col| !target_grain.contains(col))
+                .collect();
+            
+            // If extra columns include date-related columns, aggregate
+            for col in &extra_cols {
+                if col.contains("date") || col.contains("Date") || col.contains("_date") {
+                    return true;
+                }
+            }
+        }
+        
+        // For tables close to target grain (like loan_id + emi_number), don't aggregate before joining
+        // They'll be joined first, then aggregated together in the final step
+        false
+    }
+    
+    /// Get aggregation columns for a table when aggregating to target grain
+    /// Sums all numeric columns, skips non-numeric columns that aren't in target grain
+    fn get_aggregation_columns(&self, table: &Table, target_grain: &[String]) -> HashMap<String, String> {
+        let mut agg_map = HashMap::new();
+        
+        // For each column in the table, determine aggregation
+        if let Some(columns) = &table.columns {
+            for col in columns {
+                // Skip grain columns (they're in the GROUP BY)
+                if target_grain.contains(&col.name) {
+                    continue;
+                }
+                
+                // Determine aggregation based on column type
+                // Use data_type if available, otherwise default to string
+                let col_type = col.data_type.as_deref().unwrap_or("string");
+                match col_type {
+                    "float" | "integer" | "numeric" | "double" => {
+                        // Sum numeric columns
+                        agg_map.insert(col.name.clone(), format!("SUM({})", col.name));
+                    }
+                    _ => {
+                        // Skip non-numeric columns that aren't in target grain
+                        // They won't be needed for the final aggregation
+                    }
+                }
+            }
+        }
+        
+        agg_map
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -357,7 +425,56 @@ impl RuleExecutor {
             
             // Execute operation - for joins, we also need to use metadata for table paths
             if let crate::metadata::PipelineOp::Join { table, on, join_type } = step {
-                let right = self.compiler.engine.scan_with_metadata(table, &self.compiler.metadata).await?;
+                // Check if this table needs aggregation before joining
+                let target_table = self.compiler.metadata.tables.iter()
+                    .find(|t| t.name == *table)
+                    .ok_or_else(|| RcaError::Execution(format!("Table not found: {}", table)))?;
+                
+                let rule = &plan.rule;
+                let needs_aggregation = self.compiler.table_needs_aggregation(target_table, &rule.computation.aggregation_grain);
+                
+                let mut right = self.compiler.engine.scan_with_metadata(table, &self.compiler.metadata).await?;
+                
+                // Apply as-of filtering if needed
+                if let Some(date) = as_of_date {
+                    right = self.compiler.time_resolver.apply_as_of(right, table, Some(date))?;
+                }
+                
+                // Aggregate if needed before joining
+                // Include join keys in GROUP BY to preserve them for the join
+                if needs_aggregation {
+                    // Combine target grain and join keys for GROUP BY
+                    let mut group_by_cols = rule.computation.aggregation_grain.clone();
+                    for join_key in on {
+                        if !group_by_cols.contains(join_key) {
+                            group_by_cols.push(join_key.clone());
+                        }
+                    }
+                    
+                    // Check if GROUP BY matches the table's original grain (primary_key)
+                    // If so, no aggregation is needed - the table is already at this grain
+                    let table_grain = &target_table.primary_key;
+                    let group_by_matches_grain = group_by_cols.len() == table_grain.len() &&
+                        group_by_cols.iter().all(|col| table_grain.contains(col)) &&
+                        table_grain.iter().all(|col| group_by_cols.contains(col));
+                    
+                    if !group_by_matches_grain {
+                        let agg_columns = self.compiler.get_aggregation_columns(target_table, &group_by_cols);
+                        // Only aggregate if we have columns to aggregate
+                        if !agg_columns.is_empty() {
+                            right = self.compiler.engine.execute_op(
+                                &crate::metadata::PipelineOp::Group {
+                                    by: group_by_cols,
+                                    agg: agg_columns,
+                                },
+                                Some(right),
+                                None,
+                            ).await?;
+                        }
+                    }
+                    // If GROUP BY matches original grain, no aggregation needed - use table as-is
+                }
+                
                 let left = result.unwrap();
                 result = Some(
                     self.compiler.engine.join(left, right, on, join_type).await?
@@ -411,7 +528,56 @@ impl RuleExecutor {
             
             // Handle join separately to use metadata
             if let crate::metadata::PipelineOp::Join { table, on, join_type } = step {
-                let right = self.compiler.engine.scan_with_metadata(table, &self.compiler.metadata).await?;
+                // Check if this table needs aggregation before joining
+                let target_table = self.compiler.metadata.tables.iter()
+                    .find(|t| t.name == *table)
+                    .ok_or_else(|| RcaError::Execution(format!("Table not found: {}", table)))?;
+                
+                let rule = &plan.rule;
+                let needs_aggregation = self.compiler.table_needs_aggregation(target_table, &rule.computation.aggregation_grain);
+                
+                let mut right = self.compiler.engine.scan_with_metadata(table, &self.compiler.metadata).await?;
+                
+                // Apply as-of filtering if needed
+                if let Some(date) = as_of_date {
+                    right = self.compiler.time_resolver.apply_as_of(right, table, Some(date))?;
+                }
+                
+                // Aggregate if needed before joining
+                // Include join keys in GROUP BY to preserve them for the join
+                if needs_aggregation {
+                    // Combine target grain and join keys for GROUP BY
+                    let mut group_by_cols = rule.computation.aggregation_grain.clone();
+                    for join_key in on {
+                        if !group_by_cols.contains(join_key) {
+                            group_by_cols.push(join_key.clone());
+                        }
+                    }
+                    
+                    // Check if GROUP BY matches the table's original grain (primary_key)
+                    // If so, no aggregation is needed - the table is already at this grain
+                    let table_grain = &target_table.primary_key;
+                    let group_by_matches_grain = group_by_cols.len() == table_grain.len() &&
+                        group_by_cols.iter().all(|col| table_grain.contains(col)) &&
+                        table_grain.iter().all(|col| group_by_cols.contains(col));
+                    
+                    if !group_by_matches_grain {
+                        let agg_columns = self.compiler.get_aggregation_columns(target_table, &group_by_cols);
+                        // Only aggregate if we have columns to aggregate
+                        if !agg_columns.is_empty() {
+                            right = self.compiler.engine.execute_op(
+                                &crate::metadata::PipelineOp::Group {
+                                    by: group_by_cols,
+                                    agg: agg_columns,
+                                },
+                                Some(right),
+                                None,
+                            ).await?;
+                        }
+                    }
+                    // If GROUP BY matches original grain, no aggregation needed - use table as-is
+                }
+                
                 let left = result.unwrap();
                 let df = self.compiler.engine.join(left, right, on, join_type).await?;
                 

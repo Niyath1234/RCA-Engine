@@ -46,8 +46,29 @@ impl TimeResolver {
         match as_of_date {
             Some(date) => {
                 // Filter to rows where time_col <= as_of_date
-                let date_str = date.format("%Y-%m-%d").to_string();
-                let filter_expr = col(time_col).lt_eq(lit(date_str));
+                // Check column data type to handle Date vs String columns
+                let time_col_type = df.column(time_col)?.dtype();
+                
+                let filter_expr = match time_col_type {
+                    DataType::Date => {
+                        // For Date columns, use date comparison directly
+                        // Convert NaiveDate to days since epoch for comparison
+                        let days_since_epoch = date.signed_duration_since(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()).num_days();
+                        col(time_col).lt_eq(lit(days_since_epoch))
+                    }
+                    DataType::Datetime(_, _) => {
+                        // For Datetime columns, convert to timestamp
+                        let datetime = date.and_hms_opt(0, 0, 0).unwrap();
+                        let timestamp_ns = datetime.and_utc().timestamp_nanos_opt().unwrap_or(0);
+                        col(time_col).lt_eq(lit(timestamp_ns))
+                    }
+                    _ => {
+                        // For String columns, use string comparison
+                        let date_str = date.format("%Y-%m-%d").to_string();
+                        col(time_col).cast(DataType::String).lt_eq(lit(date_str))
+                    }
+                };
+                
                 Ok(df.lazy().filter(filter_expr).collect()?)
             }
             None => {
