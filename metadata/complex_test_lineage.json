@@ -1,0 +1,102 @@
+[
+  {
+    "type": "edge",
+    "from": "system_a_customers",
+    "to": "system_a_loans",
+    "keys": {
+      "customer_id": "customer_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_loan_details",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_emis",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_emis",
+    "to": "system_a_transactions",
+    "keys": {
+      "loan_id": "loan_id",
+      "emi_number": "emi_number"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_transactions",
+    "to": "system_a_payments",
+    "keys": {
+      "transaction_id": "transaction_id"
+    },
+    "relationship": "one_to_one"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_penalties",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_charges",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_payments",
+    "to": "system_a_refunds",
+    "keys": {
+      "payment_id": "payment_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_a_loans",
+    "to": "system_a_adjustments",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_many"
+  },
+  {
+    "type": "edge",
+    "from": "system_b_loans",
+    "to": "system_b_loan_summary",
+    "keys": {
+      "loan_id": "loan_id"
+    },
+    "relationship": "one_to_one"
+  },
+  {
+    "type": "possible_join",
+    "tables": ["system_a_loans", "system_b_loans"],
+    "keys": {
+      "loan_id": "loan_id"
+    }
+  }
+]
+
+

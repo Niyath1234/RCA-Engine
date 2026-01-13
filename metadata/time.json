@@ -27,6 +27,32 @@
       "max_lateness_days": 7,
       "action": "warn"
     }
-  ]
+  ],
+  "as_of_rules": [
+    {
+      "table": "collections_mis",
+      "as_of_column": "mis_date",
+      "default": "2026-01-08",
+      "description": "Collections MIS uses data from January 8th 2026"
+    },
+    {
+      "table": "outstanding_daily",
+      "as_of_column": "last_day",
+      "default": "2026-01-07",
+      "description": "Outstanding daily uses data from January 7th 2026"
+    }
+  ],
+  "date_alignment": {
+    "collections_mis": {
+      "mis_date": "2026-01-08",
+      "description": "Collections MIS snapshot date"
+    },
+    "outstanding_daily": {
+      "last_day": "2026-01-07",
+      "description": "Outstanding daily snapshot date"
+    },
+    "note": "The two systems use different snapshot dates. Collections MIS uses January 8th while Outstanding Daily uses January 7th. When reconciling, we need to account for this difference."
+  }
 }
+
 

@@ -1,0 +1,107 @@
+[
+  {
+    "id": "customer",
+    "name": "Customer",
+    "description": "Customer entity",
+    "grain": ["customer_id"],
+    "attributes": ["customer_id", "name", "registration_date", "credit_score", "customer_segment"]
+  },
+  {
+    "id": "loan",
+    "name": "Loan",
+    "description": "Loan entity",
+    "grain": ["loan_id"],
+    "attributes": ["loan_id", "customer_id", "disbursement_date", "principal_amount", "interest_rate", "tenure_months", "loan_type"]
+  },
+  {
+    "id": "emi",
+    "name": "EMI",
+    "description": "Equated Monthly Installment",
+    "grain": ["loan_id", "emi_number"],
+    "attributes": ["emi_id", "loan_id", "emi_number", "due_date", "emi_amount", "principal_component", "interest_component"]
+  },
+  {
+    "id": "transaction",
+    "name": "Transaction",
+    "description": "Financial transaction",
+    "grain": ["transaction_id"],
+    "attributes": ["transaction_id", "loan_id", "emi_number", "transaction_amount", "transaction_date", "payment_method", "transaction_status"]
+  },
+  {
+    "id": "penalty",
+    "name": "Penalty",
+    "description": "Penalty charge",
+    "grain": ["penalty_id"],
+    "attributes": ["penalty_id", "loan_id", "penalty_amount", "penalty_date", "penalty_reason"]
+  },
+  {
+    "id": "charge",
+    "name": "Charge",
+    "description": "Additional charge",
+    "grain": ["charge_id"],
+    "attributes": ["charge_id", "loan_id", "charge_amount", "charge_date", "charge_type"]
+  },
+  {
+    "id": "adjustment",
+    "name": "Adjustment",
+    "description": "Adjustment record",
+    "grain": ["adjustment_id"],
+    "attributes": ["adjustment_id", "loan_id", "adjustment_amount", "adjustment_date", "adjustment_type"]
+  },
+  {
+    "id": "interest_accrual",
+    "name": "Interest Accrual",
+    "description": "Interest accrual record",
+    "grain": ["accrual_id"],
+    "attributes": ["accrual_id", "loan_id", "accrued_interest", "accrual_date", "accrual_period"]
+  },
+  {
+    "id": "fee",
+    "name": "Fee",
+    "description": "Fee record",
+    "grain": ["fee_id"],
+    "attributes": ["fee_id", "loan_id", "fee_amount", "fee_date", "fee_type"]
+  },
+  {
+    "id": "loan_status",
+    "name": "Loan Status",
+    "description": "Loan status history",
+    "grain": ["status_id"],
+    "attributes": ["status_id", "loan_id", "status", "status_date"]
+  },
+  {
+    "id": "customer_segment",
+    "name": "Customer Segment",
+    "description": "Customer segment assignment",
+    "grain": ["segment_id"],
+    "attributes": ["segment_id", "customer_id", "segment", "segment_date"]
+  },
+  {
+    "id": "loan_product",
+    "name": "Loan Product",
+    "description": "Loan product mapping",
+    "grain": ["product_id"],
+    "attributes": ["product_id", "loan_id", "product_name", "product_start_date"]
+  },
+  {
+    "id": "audit",
+    "name": "Audit",
+    "description": "Audit log (random table)",
+    "grain": ["audit_id"],
+    "attributes": ["audit_id", "loan_id", "audit_date", "audit_type"]
+  },
+  {
+    "id": "compliance",
+    "name": "Compliance",
+    "description": "Compliance records (random table)",
+    "grain": ["compliance_id"],
+    "attributes": ["compliance_id", "customer_id", "compliance_date", "compliance_status"]
+  },
+  {
+    "id": "market",
+    "name": "Market",
+    "description": "Market data (random table)",
+    "grain": ["market_id"],
+    "attributes": ["market_id", "loan_id", "market_date", "market_index"]
+  }
+]

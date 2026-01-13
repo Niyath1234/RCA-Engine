@@ -1,0 +1,59 @@
+[
+  {
+    "id": "loan",
+    "name": "Loan",
+    "description": "Loan entity",
+    "grain": ["loan_id"],
+    "attributes": ["loan_id", "principal_amount", "interest_rate", "loan_status", "disbursement_date"]
+  },
+  {
+    "id": "customer",
+    "name": "Customer",
+    "description": "Customer entity",
+    "grain": ["customer_id"],
+    "attributes": ["customer_id", "total_loans", "total_outstanding"]
+  },
+  {
+    "id": "emi",
+    "name": "EMI",
+    "description": "Equated Monthly Installment",
+    "grain": ["loan_id", "emi_number"],
+    "attributes": ["loan_id", "emi_number", "emi_amount", "due_date"]
+  },
+  {
+    "id": "transaction",
+    "name": "Transaction",
+    "description": "Financial transaction",
+    "grain": ["loan_id", "transaction_date"],
+    "attributes": ["loan_id", "emi_number", "transaction_date", "transaction_amount", "transaction_type"]
+  },
+  {
+    "id": "interest_accrual",
+    "name": "Interest Accrual",
+    "description": "Daily interest accrual",
+    "grain": ["loan_id", "accrual_date"],
+    "attributes": ["loan_id", "accrual_date", "accrued_interest"]
+  },
+  {
+    "id": "fee",
+    "name": "Fee",
+    "description": "Fee charge",
+    "grain": ["loan_id", "fee_date"],
+    "attributes": ["loan_id", "fee_date", "fee_amount", "fee_type"]
+  },
+  {
+    "id": "penalty",
+    "name": "Penalty",
+    "description": "Penalty charge",
+    "grain": ["loan_id", "penalty_date"],
+    "attributes": ["loan_id", "penalty_date", "penalty_amount"]
+  },
+  {
+    "id": "adjustment",
+    "name": "Adjustment",
+    "description": "Balance adjustment",
+    "grain": ["loan_id", "transaction_date"],
+    "attributes": ["loan_id", "transaction_date", "transaction_type", "transaction_amount"]
+  }
+]
+

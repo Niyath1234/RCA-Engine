@@ -15,6 +15,12 @@
     ]
   },
   {
+    "type": "canonical_key",
+    "entity": "customer",
+    "canonical": "customer_id",
+    "alternates": []
+  },
+  {
     "type": "key_mapping",
     "from_system": "khatabook",
     "to_system": "tb",
@@ -22,5 +28,30 @@
     "to_key": "loan_id",
     "mapping_table": "loan_id_mapping",
     "confidence": "high"
+  },
+  {
+    "type": "canonical_key",
+    "entity": "loan",
+    "canonical": "uuid",
+    "alternates": [
+      {
+        "system": "collections_mis",
+        "key": "uuid"
+      },
+      {
+        "system": "outstanding_daily",
+        "key": "uuid"
+      }
+    ]
+  },
+  {
+    "type": "key_mapping",
+    "from_system": "collections_mis",
+    "to_system": "outstanding_daily",
+    "from_key": "uuid",
+    "to_key": "uuid",
+    "mapping_type": "direct",
+    "confidence": "high",
+    "description": "Both systems use the same uuid field to identify loans"
   }
 ]

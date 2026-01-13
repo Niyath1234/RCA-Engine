@@ -2,6 +2,7 @@ use crate::error::{RcaError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use tracing;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entity {
@@ -20,6 +21,21 @@ pub struct Table {
     pub time_column: String,
     pub system: String,
     pub path: String,
+    #[serde(default)]
+    pub columns: Option<Vec<ColumnMetadata>>,
+    #[serde(default)]
+    pub labels: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnMetadata {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub data_type: Option<String>,
+    #[serde(default)]
+    pub distinct_values: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +108,8 @@ pub struct Rule {
     pub target_entity: String,
     pub target_grain: Vec<String>,
     pub computation: ComputationDefinition,
+    #[serde(default)]
+    pub labels: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,6 +119,12 @@ pub struct ComputationDefinition {
     pub attributes_needed: HashMap<String, Vec<String>>,
     pub formula: String,
     pub aggregation_grain: Vec<String>,
+    #[serde(default)]
+    pub filter_conditions: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub source_table: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 impl std::hash::Hash for Rule {
@@ -323,25 +347,84 @@ impl Metadata {
     pub fn load(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref();
         
-        let entities: Vec<Entity> = Self::load_json(dir.join("entities.json"))?;
-        let tables_obj: serde_json::Value = Self::load_json(dir.join("tables.json"))?;
-        let tables: Vec<Table> = if tables_obj.get("tables").is_some() {
-            serde_json::from_value(tables_obj["tables"].clone())?
-        } else {
-            serde_json::from_value(tables_obj)?
-        };
-        
-        let metrics: Vec<Metric> = Self::load_json(dir.join("metrics.json"))?;
-        let business_labels_raw: BusinessLabel = Self::load_json(dir.join("business_labels.json"))?;
-        let business_labels = Self::normalize_business_labels(business_labels_raw)?;
+        // REQUIRED: rules.json must be provided (business-defined)
         let rules: Vec<Rule> = Self::load_json(dir.join("rules.json"))?;
-        let lineage_raw: Lineage = Self::load_json(dir.join("lineage.json"))?;
-        let lineage = Self::normalize_lineage(lineage_raw)?;
-        let time_rules: TimeRules = Self::load_json(dir.join("time.json"))?;
-        let identity_raw: Identity = Self::load_json(dir.join("identity.json"))?;
-        let identity_obj = Self::normalize_identity(identity_raw)?;
+        
+        // REQUIRED: exceptions.json must be provided (business-defined)
         let exceptions_raw: Exceptions = Self::load_json(dir.join("exceptions.json"))?;
         let exceptions_obj = Self::normalize_exceptions(exceptions_raw)?;
+        
+        // OPTIONAL: tables.json - try to load, will be needed for other auto-generation
+        let tables: Vec<Table> = match Self::load_json::<serde_json::Value>(dir.join("tables.json")) {
+            Ok(tables_obj) => {
+                if tables_obj.get("tables").is_some() {
+                    serde_json::from_value(tables_obj["tables"].clone())?
+                } else {
+                    serde_json::from_value(tables_obj)?
+                }
+            }
+            Err(_) => {
+                // If tables.json doesn't exist, we can't auto-generate other files
+                return Err(RcaError::Metadata("tables.json is required for auto-generation".to_string()));
+            }
+        };
+        
+        // OPTIONAL: entities.json - auto-generate if missing
+        let entities: Vec<Entity> = match Self::load_json(dir.join("entities.json")) {
+            Ok(e) => e,
+            Err(_) => {
+                tracing::info!("entities.json not found, auto-generating from tables");
+                Self::auto_generate_entities(&tables)?
+            }
+        };
+        
+        // OPTIONAL: metrics.json - auto-generate if missing
+        let metrics: Vec<Metric> = match Self::load_json(dir.join("metrics.json")) {
+            Ok(m) => m,
+            Err(_) => {
+                tracing::info!("metrics.json not found, auto-generating from rules");
+                Self::auto_generate_metrics(&rules)?
+            }
+        };
+        
+        // OPTIONAL: business_labels.json - auto-generate if missing
+        let business_labels_raw: BusinessLabel = match Self::load_json(dir.join("business_labels.json")) {
+            Ok(bl) => bl,
+            Err(_) => {
+                tracing::info!("business_labels.json not found, auto-generating from rules and tables");
+                Self::auto_generate_business_labels(&rules, &tables, &metrics)?
+            }
+        };
+        let business_labels = Self::normalize_business_labels(business_labels_raw)?;
+        
+        // OPTIONAL: lineage.json - auto-generate if missing
+        let lineage_raw: Lineage = match Self::load_json(dir.join("lineage.json")) {
+            Ok(l) => l,
+            Err(_) => {
+                tracing::info!("lineage.json not found, auto-generating from tables");
+                Self::auto_generate_lineage(&tables)?
+            }
+        };
+        let lineage = Self::normalize_lineage(lineage_raw)?;
+        
+        // OPTIONAL: time.json - auto-generate if missing
+        let time_rules: TimeRules = match Self::load_json(dir.join("time.json")) {
+            Ok(tr) => tr,
+            Err(_) => {
+                tracing::info!("time.json not found, auto-generating from tables");
+                Self::auto_generate_time_rules(&tables)?
+            }
+        };
+        
+        // OPTIONAL: identity.json - auto-generate if missing
+        let identity_raw: Identity = match Self::load_json(dir.join("identity.json")) {
+            Ok(id) => id,
+            Err(_) => {
+                tracing::info!("identity.json not found, auto-generating from entities");
+                Self::auto_generate_identity(&entities)?
+            }
+        };
+        let identity_obj = Self::normalize_identity(identity_raw)?;
         
         // Build indexes
         let tables_by_name: HashMap<_, _> = tables.iter()
@@ -409,6 +492,251 @@ impl Metadata {
             .map_err(|e| RcaError::Metadata(format!("Failed to read {}: {}", path.display(), e)))?;
         serde_json::from_str(&content)
             .map_err(|e| RcaError::Metadata(format!("Failed to parse {}: {}", path.display(), e)))
+    }
+    
+    /// Auto-generate entities.json from tables
+    fn auto_generate_entities(tables: &[Table]) -> Result<Vec<Entity>> {
+        use std::collections::HashMap;
+        
+        let mut entities_map: HashMap<String, Entity> = HashMap::new();
+        
+        for table in tables {
+            let entity_id = &table.entity;
+            
+            // Get or create entity
+            let entity = entities_map.entry(entity_id.clone()).or_insert_with(|| {
+                Entity {
+                    id: entity_id.clone(),
+                    name: entity_id.clone().chars().next().unwrap().to_uppercase().collect::<String>() 
+                        + &entity_id[1..],
+                    description: format!("{} entity", entity_id),
+                    grain: table.primary_key.clone(),
+                    attributes: Vec::new(),
+                }
+            });
+            
+            // Merge grain (union of all primary keys for this entity)
+            for pk in &table.primary_key {
+                if !entity.grain.contains(pk) {
+                    entity.grain.push(pk.clone());
+                }
+            }
+            
+            // Collect attributes from table columns
+            if let Some(ref columns) = table.columns {
+                for col in columns {
+                    if !entity.attributes.contains(&col.name) {
+                        entity.attributes.push(col.name.clone());
+                    }
+                }
+            }
+        }
+        
+        Ok(entities_map.into_values().collect())
+    }
+    
+    /// Auto-generate metrics.json from rules
+    fn auto_generate_metrics(rules: &[Rule]) -> Result<Vec<Metric>> {
+        use std::collections::HashMap;
+        
+        let mut metrics_map: HashMap<String, Metric> = HashMap::new();
+        
+        for rule in rules {
+            let metric_id = &rule.metric;
+            
+            // Get or create metric
+            let metric = metrics_map.entry(metric_id.clone()).or_insert_with(|| {
+                Metric {
+                    id: metric_id.clone(),
+                    name: metric_id.clone().to_uppercase(),
+                    description: format!("{} metric", metric_id),
+                    grain: rule.target_grain.clone(),
+                    precision: 2, // Default precision
+                    null_policy: "zero".to_string(), // Default null policy
+                    unit: "currency".to_string(), // Default unit
+                    versions: Vec::new(),
+                }
+            });
+            
+            // Merge grain (union of all target_grain for this metric)
+            for grain_col in &rule.target_grain {
+                if !metric.grain.contains(grain_col) {
+                    metric.grain.push(grain_col.clone());
+                }
+            }
+        }
+        
+        Ok(metrics_map.into_values().collect())
+    }
+    
+    /// Auto-generate business_labels.json from rules, tables, and metrics
+    fn auto_generate_business_labels(
+        rules: &[Rule],
+        tables: &[Table],
+        metrics: &[Metric],
+    ) -> Result<BusinessLabel> {
+        use std::collections::HashSet;
+        
+        // Extract unique systems from rules and tables
+        let mut systems_set: HashSet<String> = HashSet::new();
+        for rule in rules {
+            systems_set.insert(rule.system.clone());
+        }
+        for table in tables {
+            systems_set.insert(table.system.clone());
+        }
+        
+        // Extract unique metrics from rules
+        let mut metrics_set: HashSet<String> = HashSet::new();
+        for rule in rules {
+            metrics_set.insert(rule.metric.clone());
+        }
+        for metric in metrics {
+            metrics_set.insert(metric.id.clone());
+        }
+        
+        // Create system labels
+        let systems: Vec<SystemLabel> = systems_set.into_iter().map(|system_id| {
+            SystemLabel {
+                label: system_id.clone().chars().next().unwrap().to_uppercase().collect::<String>()
+                    + &system_id[1..],
+                aliases: vec![system_id.clone(), system_id.to_lowercase()],
+                system_id,
+            }
+        }).collect();
+        
+        // Create metric labels
+        let metric_labels: Vec<MetricLabel> = metrics_set.into_iter().map(|metric_id| {
+            MetricLabel {
+                label: metric_id.clone().to_uppercase(),
+                aliases: vec![metric_id.clone(), metric_id.to_lowercase()],
+                metric_id,
+            }
+        }).collect();
+        
+        // Default reconciliation types
+        let reconciliation_types = vec![
+            ReconciliationTypeLabel {
+                label: "reconciliation".to_string(),
+                aliases: vec!["recon".to_string(), "reconcile".to_string(), "compare".to_string(), "match".to_string()],
+            },
+            ReconciliationTypeLabel {
+                label: "as of".to_string(),
+                aliases: vec!["as-of".to_string(), "asof".to_string(), "as of date".to_string(), "snapshot".to_string()],
+            },
+        ];
+        
+        Ok(BusinessLabel::Object(BusinessLabelObject {
+            systems,
+            metrics: metric_labels,
+            reconciliation_types,
+        }))
+    }
+    
+    /// Auto-generate lineage.json from tables
+    fn auto_generate_lineage(tables: &[Table]) -> Result<Lineage> {
+        use std::collections::HashMap;
+        
+        let mut edges = Vec::new();
+        
+        // Group tables by entity
+        let mut tables_by_entity: HashMap<String, Vec<&Table>> = HashMap::new();
+        for table in tables {
+            tables_by_entity
+                .entry(table.entity.clone())
+                .or_insert_with(Vec::new)
+                .push(table);
+        }
+        
+        // For each entity, create edges between tables with matching primary keys
+        for (entity, entity_tables) in &tables_by_entity {
+            if entity_tables.len() < 2 {
+                continue;
+            }
+            
+            // Find common primary keys
+            let mut common_keys: Option<Vec<String>> = None;
+            for table in entity_tables {
+                if let Some(ref keys) = common_keys {
+                    let new_keys: Vec<String> = keys.iter()
+                        .filter(|k| table.primary_key.contains(k))
+                        .cloned()
+                        .collect();
+                    common_keys = Some(new_keys);
+                } else {
+                    common_keys = Some(table.primary_key.clone());
+                }
+            }
+            
+            if let Some(ref keys) = common_keys {
+                if !keys.is_empty() {
+                    // Create edges between all pairs of tables for this entity
+                    for i in 0..entity_tables.len() {
+                        for j in (i + 1)..entity_tables.len() {
+                            let from_table = entity_tables[i];
+                            let to_table = entity_tables[j];
+                            
+                            let mut key_map = HashMap::new();
+                            for key in keys {
+                                key_map.insert(key.clone(), key.clone());
+                            }
+                            
+                            edges.push(LineageEdge {
+                                from: from_table.name.clone(),
+                                to: to_table.name.clone(),
+                                keys: key_map,
+                                relationship: "join".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(Lineage::Object(LineageObject {
+            edges,
+            possible_joins: Vec::new(),
+        }))
+    }
+    
+    /// Auto-generate time.json from tables
+    fn auto_generate_time_rules(tables: &[Table]) -> Result<TimeRules> {
+        let mut as_of_rules = Vec::new();
+        
+        for table in tables {
+            if !table.time_column.is_empty() {
+                // Check if time_column matches common patterns
+                let time_col = &table.time_column;
+                if time_col.contains("date") || time_col.contains("time") || time_col.contains("timestamp") {
+                    as_of_rules.push(AsOfRule {
+                        table: table.name.clone(),
+                        as_of_column: time_col.clone(),
+                        default: "2025-12-31".to_string(), // Default date
+                    });
+                }
+            }
+        }
+        
+        Ok(TimeRules {
+            as_of_rules,
+            lateness_rules: Vec::new(),
+        })
+    }
+    
+    /// Auto-generate identity.json from entities
+    fn auto_generate_identity(entities: &[Entity]) -> Result<Identity> {
+        let canonical_keys: Vec<CanonicalKey> = entities.iter().map(|entity| {
+            CanonicalKey {
+                entity: entity.id.clone(),
+                canonical: entity.grain.first().unwrap_or(&entity.id).clone(),
+                alternates: Vec::new(),
+            }
+        }).collect();
+        
+        Ok(Identity::Object(IdentityObject {
+            canonical_keys,
+            key_mappings: Vec::new(),
+        }))
     }
     
     fn normalize_business_labels(labels: BusinessLabel) -> Result<BusinessLabelObject> {
@@ -492,14 +820,149 @@ impl Metadata {
     }
     
     pub fn get_rules_for_system_metric(&self, system: &str, metric: &str) -> Vec<Rule> {
-        self.rules_by_system_metric
+        // Try exact match first
+        let exact_match = self.rules_by_system_metric
             .get(&(system.to_string(), metric.to_string()))
             .cloned()
-            .unwrap_or_default()
+            .unwrap_or_default();
+        
+        if !exact_match.is_empty() {
+            return exact_match;
+        }
+        
+        // Try case-insensitive match
+        let system_lower = system.to_lowercase();
+        let metric_lower = metric.to_lowercase();
+        
+        self.rules
+            .iter()
+            .filter(|r| {
+                r.system.to_lowercase() == system_lower && 
+                r.metric.to_lowercase() == metric_lower
+            })
+            .cloned()
+            .collect()
     }
     
     pub fn get_metric(&self, id: &str) -> Option<&Metric> {
         self.metrics_by_id.get(id)
+    }
+    
+    /// Populate distinct values for columns in a table from data file
+    /// Only stores distinct values if the distinct count is < 50
+    pub fn populate_distinct_values(
+        &mut self,
+        table_name: &str,
+        data_dir: impl AsRef<Path>,
+    ) -> Result<()> {
+        use polars::prelude::*;
+        
+        // Get table path first (need to clone table to avoid borrow issues)
+        let table_path = {
+            let table = self.tables_by_name.get(table_name)
+                .ok_or_else(|| RcaError::Metadata(format!("Table not found: {}", table_name)))?;
+            data_dir.as_ref().join(&table.path)
+        };
+        
+        if !table_path.exists() {
+            return Err(RcaError::Metadata(format!("Table file not found: {}", table_path.display())));
+        }
+        
+        // Load the data file
+        let df = LazyFrame::scan_parquet(&table_path, ScanArgsParquet::default())
+            .and_then(|lf| lf.collect())
+            .map_err(|e| RcaError::Metadata(format!("Failed to load table {}: {}", table_name, e)))?;
+        
+        // Get mutable reference to table
+        let table = self.tables_by_name.get_mut(table_name)
+            .ok_or_else(|| RcaError::Metadata(format!("Table not found: {}", table_name)))?;
+        
+        // Initialize columns metadata if it doesn't exist
+        if table.columns.is_none() {
+            let column_names: Vec<String> = df.get_column_names().iter().map(|s| s.to_string()).collect();
+            table.columns = Some(
+                column_names.into_iter()
+                    .map(|name| ColumnMetadata {
+                        name,
+                        description: None,
+                        data_type: None,
+                        distinct_values: None,
+                    })
+                    .collect()
+            );
+        }
+        
+        // Update distinct values for each column
+        if let Some(ref mut columns) = table.columns {
+            for col_meta in columns.iter_mut() {
+                if df.column(&col_meta.name).is_ok() {
+                    // Get distinct values
+                    let distinct_df = df.clone()
+                        .lazy()
+                        .select([col(&col_meta.name).unique()])
+                        .collect()
+                        .map_err(|e| RcaError::Metadata(format!("Failed to get distinct values for column {}: {}", col_meta.name, e)))?;
+                    
+                    let distinct_count = distinct_df.height();
+                    
+                    // Only store if distinct count < 50
+                    if distinct_count < 50 {
+                        let mut distinct_vals = Vec::new();
+                        let col_series = distinct_df.column(&col_meta.name)
+                            .map_err(|e| RcaError::Metadata(format!("Failed to get column {}: {}", col_meta.name, e)))?;
+                        
+                        for i in 0..distinct_count {
+                            let val = match col_series.dtype() {
+                                DataType::String => {
+                                    if let Ok(s) = col_series.str() {
+                                        s.get(i).map(|v| serde_json::Value::String(v.to_string()))
+                                    } else {
+                                        None
+                                    }
+                                }
+                                DataType::Int64 => {
+                                    if let Ok(n) = col_series.i64() {
+                                        n.get(i).map(|v| serde_json::Value::Number(serde_json::Number::from(v)))
+                                    } else {
+                                        None
+                                    }
+                                }
+                                DataType::Float64 => {
+                                    if let Ok(n) = col_series.f64() {
+                                        n.get(i).and_then(|v| {
+                                            serde_json::Number::from_f64(v).map(serde_json::Value::Number)
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
+                                DataType::Boolean => {
+                                    if let Ok(b) = col_series.bool() {
+                                        b.get(i).map(|v| serde_json::Value::Bool(v))
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            };
+                            
+                            if let Some(val) = val {
+                                distinct_vals.push(val);
+                            }
+                        }
+                        
+                        col_meta.distinct_values = Some(distinct_vals);
+                    }
+                }
+            }
+        }
+        
+        // Also update the tables vector to keep it in sync
+        if let Some(table_in_vec) = self.tables.iter_mut().find(|t| t.name == table_name) {
+            *table_in_vec = table.clone();
+        }
+        
+        Ok(())
     }
 }
 

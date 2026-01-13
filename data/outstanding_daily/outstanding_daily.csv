@@ -1,0 +1,13 @@
+uuid,order_id,last_day,principal_outstanding,asset_class,loan_type,settlement_flag,nbfc_name_colending,parent_nbfc_name,order_type
+uuid-001,order-001,2026-01-07,15000.00,STANDARD,Digital,unsettled,quadrillion,,regular
+uuid-002,order-002,2026-01-07,20000.00,SMA-0,Digital,unsettled,slicenesfb,,regular
+uuid-003,order-003,2026-01-07,12000.00,STANDARD,Digital,unsettled,nesfb,,regular
+uuid-004,order-004,2026-01-07,25000.00,SMA-1,Digital,unsettled,quadrillion,,regular
+uuid-005,order-005,2026-01-07,8000.00,STANDARD,Digital,unsettled,slicenesfb,,regular
+uuid-006,order-006,2026-01-07,18000.00,SMA-2,Digital,unsettled,nesfb,,regular
+uuid-007,order-007,2026-01-07,22000.00,NPA,Digital,unsettled,quadrillion,,regular
+uuid-008,order-008,2026-01-07,14000.00,STANDARD,Digital,unsettled,slicenesfb,,regular
+uuid-009,order-009,2026-01-07,30000.00,WRITEOFF,Digital,unsettled,nesfb,,regular
+uuid-010,order-010,2026-01-07,11000.00,STANDARD,Digital,unsettled,quadrillion,,regular
+uuid-011,order-011,2026-01-07,16000.00,SMA-0,Digital,unsettled,slicenesfb,,credin
+

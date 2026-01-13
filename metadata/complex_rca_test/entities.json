@@ -1,0 +1,73 @@
+[
+  {
+    "id": "customer",
+    "name": "Customer",
+    "description": "Customer entity",
+    "grain": ["customer_id"],
+    "attributes": ["customer_id", "name", "registration_date", "credit_score"]
+  },
+  {
+    "id": "loan",
+    "name": "Loan",
+    "description": "Loan entity",
+    "grain": ["loan_id"],
+    "attributes": ["loan_id", "customer_id", "disbursement_date", "principal_amount", "interest_rate", "tenure_months"]
+  },
+  {
+    "id": "emi",
+    "name": "EMI",
+    "description": "Equated Monthly Installment",
+    "grain": ["loan_id", "emi_number"],
+    "attributes": ["emi_id", "loan_id", "emi_number", "due_date", "emi_amount", "principal_component", "interest_component"]
+  },
+  {
+    "id": "transaction",
+    "name": "Transaction",
+    "description": "Financial transaction",
+    "grain": ["transaction_id"],
+    "attributes": ["transaction_id", "loan_id", "emi_number", "transaction_amount", "transaction_date", "payment_method"]
+  },
+  {
+    "id": "penalty",
+    "name": "Penalty",
+    "description": "Penalty charge",
+    "grain": ["penalty_id"],
+    "attributes": ["penalty_id", "loan_id", "penalty_amount", "penalty_date", "penalty_reason"]
+  },
+  {
+    "id": "charge",
+    "name": "Charge",
+    "description": "Additional charge",
+    "grain": ["charge_id"],
+    "attributes": ["charge_id", "loan_id", "charge_amount", "charge_date", "charge_type"]
+  },
+  {
+    "id": "adjustment",
+    "name": "Adjustment",
+    "description": "Adjustment record",
+    "grain": ["adjustment_id"],
+    "attributes": ["adjustment_id", "loan_id", "adjustment_amount", "adjustment_date", "adjustment_type"]
+  },
+  {
+    "id": "weather",
+    "name": "Weather",
+    "description": "Weather data (random table)",
+    "grain": ["weather_id"],
+    "attributes": ["weather_id", "customer_id", "weather_date", "temperature", "humidity", "precipitation"]
+  },
+  {
+    "id": "market",
+    "name": "Market",
+    "description": "Market indices (random table)",
+    "grain": ["index_id"],
+    "attributes": ["index_id", "loan_id", "index_date", "market_index_value", "volatility"]
+  },
+  {
+    "id": "sentiment",
+    "name": "Sentiment",
+    "description": "Customer sentiment (random table)",
+    "grain": ["sentiment_id"],
+    "attributes": ["sentiment_id", "customer_id", "sentiment_date", "sentiment_score", "sentiment_category"]
+  }
+]
+

@@ -1,0 +1,104 @@
+{
+  "terms": {
+    "paid_date": {
+      "definition": "The date when a payment was made or received",
+      "aliases": ["payment_date", "paid date", "payment date", "recovery_date"],
+      "business_meaning": "Date on which the customer made a payment towards their loan",
+      "related_tables": ["collections_mis", "emi_payment_view"],
+      "data_type": "date"
+    },
+    "paid_amount": {
+      "definition": "The amount of money that was paid",
+      "aliases": ["payment_amount", "paid amount", "payment amount", "recovery_amount", "recovery"],
+      "business_meaning": "Amount paid by the customer towards their loan repayment",
+      "related_tables": ["collections_mis", "emi_payment_view"],
+      "data_type": "currency"
+    },
+    "reconciliation": {
+      "definition": "The process of comparing data from two or more systems to identify differences",
+      "aliases": ["recon", "reconcile", "compare", "match"],
+      "business_meaning": "Compare paid dates and amounts between different systems to find discrepancies",
+      "use_cases": ["Find missing payments", "Identify date mismatches", "Find amount differences"]
+    },
+    "uuid": {
+      "definition": "Unique identifier for a loan or customer",
+      "aliases": ["user_uuid", "loan_uuid", "customer_id"],
+      "business_meaning": "Primary key to match records between systems",
+      "related_tables": ["collections_mis", "outstanding_daily"]
+    },
+    "successful_repayment": {
+      "definition": "A repayment transaction that completed successfully",
+      "aliases": ["successful payment", "completed repayment"],
+      "business_meaning": "Payment that was processed and confirmed",
+      "filter": "status = 'SUCCESS'"
+    },
+    "deleted_record": {
+      "definition": "A record that has been marked as deleted",
+      "aliases": ["deleted", "removed", "soft deleted"],
+      "business_meaning": "Record that should be excluded from analysis",
+      "filters": ["__is_deleted = false", "is_deleted = 'false'"]
+    },
+    "unsettled_loan": {
+      "definition": "A loan that has not been fully paid off or closed",
+      "aliases": ["active loan", "open loan"],
+      "business_meaning": "Loan that is still active and requires payment tracking",
+      "filter": "settlement_flag = 'unsettled'"
+    },
+    "nbfc": {
+      "definition": "Non-Banking Financial Company",
+      "aliases": ["financial company", "lender"],
+      "business_meaning": "The company that provided the loan",
+      "valid_values": ["quadrillion", "slicenesfb", "nesfb"],
+      "filter": "nbfc_name_colending IN ('quadrillion', 'slicenesfb', 'nesfb') OR parent_nbfc_name IN ('quadrillion', 'slicenesfb', 'nesfb')"
+    },
+    "credin": {
+      "definition": "A specific type of loan order",
+      "aliases": ["credin order"],
+      "business_meaning": "A type of loan that should be excluded from certain analyses",
+      "filter": "order_type != 'credin'"
+    }
+  },
+  "tables": {
+    "collections_mis": {
+      "description": "Collections Management Information System table",
+      "contains": ["loan information", "payment dates", "payment amounts", "bucket information"],
+      "key_fields": ["uuid", "mis_date", "paid_date", "paid_amount", "pos", "current_bucket"],
+      "time_field": "mis_date",
+      "primary_key": ["uuid", "mis_date"]
+    },
+    "outstanding_daily": {
+      "description": "Daily snapshot of outstanding loan balances",
+      "contains": ["loan balances", "order information", "asset classification"],
+      "key_fields": ["uuid", "order_id", "last_day", "principal_outstanding", "asset_class"],
+      "time_field": "last_day",
+      "primary_key": ["order_id", "last_day"]
+    },
+    "repayments": {
+      "description": "Repayment transaction records",
+      "contains": ["repayment transactions", "payment status", "order links"],
+      "key_fields": ["repay_id", "order_id", "user_uuid", "status", "__is_deleted"],
+      "time_field": "created_at",
+      "primary_key": ["repay_id"]
+    },
+    "emi_payment_view": {
+      "description": "EMI payment details view",
+      "contains": ["payment dates", "payment amounts", "transaction details"],
+      "key_fields": ["repayment_txn_id", "paid_date", "paid_amount", "is_deleted"],
+      "time_field": "created_at",
+      "primary_key": ["repayment_txn_id"]
+    }
+  },
+  "relationships": {
+    "outstanding_daily_to_repayments": {
+      "description": "Outstanding daily loans connect to repayment records",
+      "join_key": "order_id",
+      "relationship": "one-to-many"
+    },
+    "repayments_to_emi_payment_view": {
+      "description": "Repayment records connect to payment details",
+      "join_key": "repay_id to repayment_txn_id",
+      "relationship": "one-to-one"
+    }
+  }
+}
+

@@ -1,0 +1,92 @@
+[
+  {
+    "id": "system_a_personal_tos",
+    "system": "system_a",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "PERSONAL loan TOS: SUM(emi_amount) - SUM(transaction_amount) + SUM(penalty_amount) - SUM(fee_amount). For PERSONAL loans, charges and adjustments are not included.",
+      "source_entities": ["loan", "emi", "transaction", "penalty", "fee"],
+      "attributes_needed": {
+        "emi": ["loan_id", "emi_number", "emi_amount"],
+        "transaction": ["loan_id", "emi_number", "transaction_amount"],
+        "penalty": ["loan_id", "penalty_amount"],
+        "fee": ["loan_id", "fee_amount"]
+      },
+      "formula": "SUM(emi_amount - COALESCE(transaction_amount, 0) + COALESCE(penalty_amount, 0) - COALESCE(fee_amount, 0))",
+      "aggregation_grain": ["loan_id"],
+      "filter_conditions": {
+        "loan_type": "PERSONAL"
+      }
+    }
+  },
+  {
+    "id": "system_a_business_tos",
+    "system": "system_a",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "BUSINESS loan TOS: SUM(emi_amount) - SUM(transaction_amount) + SUM(penalty_amount) - SUM(charge_amount) + SUM(adjustment_amount) + SUM(accrued_interest). For BUSINESS loans, fees are waived but charges and adjustments are included.",
+      "source_entities": ["loan", "emi", "transaction", "penalty", "charge", "adjustment", "interest_accrual"],
+      "attributes_needed": {
+        "emi": ["loan_id", "emi_number", "emi_amount"],
+        "transaction": ["loan_id", "emi_number", "transaction_amount"],
+        "penalty": ["loan_id", "penalty_amount"],
+        "charge": ["loan_id", "charge_amount"],
+        "adjustment": ["loan_id", "adjustment_amount"],
+        "interest_accrual": ["loan_id", "accrued_interest"]
+      },
+      "formula": "SUM(emi_amount - COALESCE(transaction_amount, 0) + COALESCE(penalty_amount, 0) - COALESCE(charge_amount, 0) + COALESCE(adjustment_amount, 0) + COALESCE(accrued_interest, 0))",
+      "aggregation_grain": ["loan_id"],
+      "filter_conditions": {
+        "loan_type": "BUSINESS"
+      }
+    }
+  },
+  {
+    "id": "system_a_msme_tos",
+    "system": "system_a",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "MSME loan TOS: SUM(emi_amount) - SUM(transaction_amount) + SUM(penalty_amount) - SUM(charge_amount) + SUM(adjustment_amount) + SUM(accrued_interest) - SUM(fee_amount). Full calculation for MSME loans.",
+      "source_entities": ["loan", "emi", "transaction", "penalty", "charge", "adjustment", "interest_accrual", "fee"],
+      "attributes_needed": {
+        "emi": ["loan_id", "emi_number", "emi_amount"],
+        "transaction": ["loan_id", "emi_number", "transaction_amount"],
+        "penalty": ["loan_id", "penalty_amount"],
+        "charge": ["loan_id", "charge_amount"],
+        "adjustment": ["loan_id", "adjustment_amount"],
+        "interest_accrual": ["loan_id", "accrued_interest"],
+        "fee": ["loan_id", "fee_amount"]
+      },
+      "formula": "SUM(emi_amount - COALESCE(transaction_amount, 0) + COALESCE(penalty_amount, 0) - COALESCE(charge_amount, 0) + COALESCE(adjustment_amount, 0) + COALESCE(accrued_interest, 0) - COALESCE(fee_amount, 0))",
+      "aggregation_grain": ["loan_id"],
+      "filter_conditions": {
+        "loan_type": "MSME"
+      }
+    }
+  },
+  {
+    "id": "system_b_tos_unified",
+    "system": "system_b",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "System B uses a DIFFERENT unified logic: total_outstanding = principal_outstanding + interest_outstanding. This is pre-computed and does NOT match System A's product-specific rules. System B does NOT differentiate by loan_type - uses same formula for all.",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "total_outstanding", "principal_outstanding", "interest_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["loan_id"],
+      "source_table": "system_b_loan_summary",
+      "note": "System B uses different calculation logic - principal + interest only, no product-specific rules"
+    }
+  }
+]
+

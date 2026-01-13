@@ -4,6 +4,7 @@ use rca_engine::rca::RcaEngine;
 use rca_engine::llm::LlmClient;
 use std::path::PathBuf;
 use std::fs;
+use dotenv;
 
 /// Create test data files in Parquet format
 fn create_test_data_files(data_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -123,14 +124,46 @@ async fn test_end_to_end_reconciliation() -> Result<(), Box<dyn std::error::Erro
     println!("  ✓ Loaded {} rules", metadata.rules.len());
     println!("  ✓ Loaded {} metrics", metadata.metrics.len());
 
-    // Initialize LLM client (with dummy API key for testing)
-    println!("\n🤖 Initializing LLM client (dummy mode)...");
-    let llm = LlmClient::new(
-        "dummy-api-key".to_string(),
-        "gpt-4o-mini".to_string(),
-        "https://api.openai.com/v1".to_string(),
-    );
-    println!("  ✓ LLM client initialized (dummy mode)");
+    // Initialize LLM client - check environment variables and .env file
+    println!("\n🤖 Initializing LLM client...");
+    
+    // First, try to load from .env file (if it exists)
+    // dotenv::dotenv() searches from current directory up to root
+    let dotenv_loaded = dotenv::dotenv().is_ok();
+    if dotenv_loaded {
+        println!("  ✓ Loaded .env file");
+    } else {
+        println!("  ℹ️  No .env file found (checking environment variables directly)");
+    }
+    
+    // Check for API key in environment (either from .env or already set)
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .unwrap_or_else(|_| {
+            println!("  ⚠️  Warning: OPENAI_API_KEY not found in environment or .env file");
+            println!("  ℹ️  Using dummy mode - test will use mock LLM responses");
+            println!("  ℹ️  To use real OpenAI API:");
+            println!("     - Set OPENAI_API_KEY environment variable, OR");
+            println!("     - Create a .env file in the project root with: OPENAI_API_KEY=your-key");
+            "dummy-api-key".to_string()
+        });
+    
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    
+    let base_url = std::env::var("OPENAI_BASE_URL")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    
+    let llm = LlmClient::new(api_key.clone(), model.clone(), base_url.clone());
+    
+    if api_key == "dummy-api-key" {
+        println!("  ✓ LLM client initialized (DUMMY MODE - using mock responses)");
+        println!("  ⚠️  Note: This test will NOT make real API calls to OpenAI");
+    } else {
+        println!("  ✓ LLM client initialized (REAL MODE - using OpenAI API)");
+        println!("  ✓ Model: {}", model);
+        println!("  ✓ Base URL: {}", base_url);
+        println!("  ✓ API Key: {}...{}", &api_key[..8.min(api_key.len())], &api_key[api_key.len().saturating_sub(4)..]);
+    }
 
     // Create RCA engine
     println!("\n🚀 Creating RCA Engine...");

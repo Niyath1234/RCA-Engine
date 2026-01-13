@@ -1,14 +1,29 @@
 use crate::error::{RcaError, Result};
-use crate::metadata::{Lineage, Metadata, Rule};
+use crate::metadata::Metadata;
+use crate::graph_adapter::GraphAdapter;
 use std::collections::{HashMap, HashSet};
 
 pub struct Hypergraph {
     metadata: Metadata,
+    adapter: Option<GraphAdapter>,
 }
 
 impl Hypergraph {
     pub fn new(metadata: Metadata) -> Self {
-        Self { metadata }
+        // Try to create adapter, but don't fail if it doesn't work
+        let adapter = GraphAdapter::new(metadata.clone()).ok();
+        Self { 
+            metadata,
+            adapter,
+        }
+    }
+    
+    /// Get the graph adapter (creates if not exists)
+    pub fn adapter(&mut self) -> Result<&GraphAdapter> {
+        if self.adapter.is_none() {
+            self.adapter = Some(GraphAdapter::new(self.metadata.clone())?);
+        }
+        Ok(self.adapter.as_ref().unwrap())
     }
     
     /// Get all tables referenced by a rule (derived from rule's computation definition)
@@ -114,6 +129,104 @@ impl Hypergraph {
             .ok_or_else(|| RcaError::Graph(format!("Rule not found: {}", rule_id)))?;
         
         Ok(rule.target_grain.clone())
+    }
+    
+    /// Find columns containing a specific value using metadata distinct_values and Hypergraph
+    /// Returns a list of (table_name, column_name) tuples where the value might be found
+    /// Uses Hypergraph's advanced node statistics and fragments for better matching
+    pub fn find_columns_with_value(&self, search_value: &str, system: Option<&str>) -> Vec<(String, String)> {
+        // First try using Hypergraph adapter if available
+        if let Some(ref adapter) = self.adapter {
+            let hypergraph_results = adapter.find_columns_with_value(search_value, system);
+            if !hypergraph_results.is_empty() {
+                return hypergraph_results;
+            }
+        }
+        
+        // Fallback to metadata-based search
+        let search_lower = search_value.to_lowercase();
+        let mut results = Vec::new();
+        
+        for table in &self.metadata.tables {
+            // Filter by system if provided
+            if let Some(sys) = system {
+                if table.system != sys {
+                    continue;
+                }
+            }
+            
+            // Check columns metadata
+            if let Some(ref columns) = table.columns {
+                for col_meta in columns {
+                    // Check if column has distinct values
+                    if let Some(ref distinct_vals) = col_meta.distinct_values {
+                        // Check if any distinct value matches the search value
+                        for val in distinct_vals {
+                            let val_str = match val {
+                                serde_json::Value::String(s) => s.to_lowercase(),
+                                serde_json::Value::Number(n) => n.to_string(),
+                                serde_json::Value::Bool(b) => b.to_string(),
+                                _ => continue,
+                            };
+                            
+                            // Check for exact match or substring match
+                            if val_str == search_lower || val_str.contains(&search_lower) || search_lower.contains(&val_str) {
+                                results.push((table.name.clone(), col_meta.name.clone()));
+                                break; // Found a match, move to next column
+                            }
+                        }
+                    }
+                    
+                    // Also check column name patterns (fallback)
+                    let col_lower = col_meta.name.to_lowercase();
+                    if (search_lower == "msme" && (col_lower.contains("psl") || col_lower.contains("msme") || col_lower.contains("category"))) ||
+                       (search_lower == "edl" && (col_lower.contains("edl") || col_lower.contains("product"))) {
+                        // Only add if not already added
+                        if !results.iter().any(|(t, c)| t == &table.name && c == &col_meta.name) {
+                            results.push((table.name.clone(), col_meta.name.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        
+        results
+    }
+    
+    /// Find join path using Hypergraph's optimized path finder
+    pub fn find_join_path_optimized(&mut self, from: &str, to: &str) -> Result<Option<Vec<String>>> {
+        if let Ok(adapter) = self.adapter() {
+            adapter.find_join_path(from, to)
+        } else {
+            // Fallback to simple BFS - convert JoinStep to Vec<String>
+            self.find_join_path(from, to).map(|opt| {
+                opt.map(|steps| {
+                    let mut tables = vec![steps[0].from.clone()];
+                    for step in steps {
+                        tables.push(step.to.clone());
+                    }
+                    tables
+                })
+            })
+        }
+    }
+    
+    /// Get related tables using Hypergraph's adjacency
+    pub fn get_related_tables(&mut self, table_name: &str) -> Result<Vec<String>> {
+        if let Ok(adapter) = self.adapter() {
+            Ok(adapter.get_related_tables(table_name))
+        } else {
+            // Fallback: use lineage edges
+            let mut related = Vec::new();
+            for edge in &self.metadata.lineage.edges {
+                if edge.from == table_name {
+                    related.push(edge.to.clone());
+                } else if edge.to == table_name {
+                    related.push(edge.from.clone());
+                }
+            }
+            Ok(related)
+        }
     }
 }
 

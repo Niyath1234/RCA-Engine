@@ -3,8 +3,8 @@
     "id": "loan",
     "name": "Loan",
     "description": "Individual loan entity",
-    "grain": ["loan_id"],
-    "attributes": ["loan_id", "customer_id", "disbursement_date", "principal_amount"]
+    "grain": ["loan_id", "loan_account_id"],
+    "attributes": ["loan_id", "loan_account_id", "customer_id", "customer_number", "account_number", "disbursement_date", "disbursement_amount", "sanction_limit", "principal_amount", "leadger_balance", "final_outstanding", "roi", "branch_code", "branch_name", "product_code", "product_name", "reportdate"]
   },
   {
     "id": "emi",
@@ -21,3 +21,4 @@
     "attributes": ["transaction_id", "loan_id", "emi_number", "amount", "transaction_date", "type"]
   }
 ]
+

@@ -1,0 +1,23 @@
+[package]
+name = "world-state"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "world_state"
+path = "mod.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Optional KnowledgeBase integration
+[features]
+default = []
+knowledge-base = ["knowledge_base"]
+
+[dependencies.knowledge_base]
+version = "0.1.0"
+path = "../KnowledgeBase"
+optional = true
+

@@ -1,0 +1,25 @@
+{
+  "canonical_keys": [
+    {
+      "entity": "loan",
+      "canonical": "loan_id",
+      "alternates": []
+    },
+    {
+      "entity": "customer",
+      "canonical": "customer_id",
+      "alternates": []
+    }
+  ],
+  "key_mappings": [
+    {
+      "from_system": "system_a",
+      "to_system": "system_b",
+      "from_key": "loan_id",
+      "to_key": "loan_id",
+      "mapping_table": "",
+      "confidence": "high"
+    }
+  ]
+}
+

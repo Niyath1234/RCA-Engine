@@ -1,6 +1,10 @@
+use crate::data_utils;
+use crate::de_executor::DeExecutor;
 use crate::error::{RcaError, Result};
 use crate::metadata::PipelineOp;
+use crate::tool_system::ToolExecutionContext;
 use polars::prelude::*;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub struct RelationalEngine {
@@ -63,6 +67,9 @@ impl RelationalEngine {
             .collect()
             .map_err(|e| RcaError::Execution(format!("Failed to collect {}: {}", table, e)))?;
         
+        // Convert any string columns containing scientific notation to numeric
+        let df = data_utils::convert_scientific_notation_columns(df)?;
+        
         Ok(df)
     }
     
@@ -77,21 +84,79 @@ impl RelationalEngine {
             return Err(RcaError::Execution(format!("Table file not found: {}", path.display())));
         }
         
-        let df = LazyFrame::scan_parquet(&path, ScanArgsParquet::default())
-            .map_err(|e| RcaError::Execution(format!("Failed to scan {}: {}", table_name, e)))?
-            .collect()
-            .map_err(|e| RcaError::Execution(format!("Failed to collect {}: {}", table_name, e)))?;
+        // Load based on file extension
+        let df = if path.extension().and_then(|s| s.to_str()) == Some("csv") {
+            // Load CSV file
+            LazyCsvReader::new(&path)
+                .with_try_parse_dates(true)
+                .with_infer_schema_length(Some(1000))
+                .finish()
+                .map_err(|e| RcaError::Execution(format!("Failed to scan CSV {}: {}", table_name, e)))?
+                .collect()
+                .map_err(|e| RcaError::Execution(format!("Failed to collect CSV {}: {}", table_name, e)))?
+        } else {
+            // Load Parquet file (default)
+            LazyFrame::scan_parquet(&path, ScanArgsParquet::default())
+                .map_err(|e| RcaError::Execution(format!("Failed to scan {}: {}", table_name, e)))?
+                .collect()
+                .map_err(|e| RcaError::Execution(format!("Failed to collect {}: {}", table_name, e)))?
+        };
+        
+        // Convert any string columns containing scientific notation to numeric
+        let df = data_utils::convert_scientific_notation_columns(df)?;
         
         Ok(df)
     }
     
-    pub async fn join(
+    /// Join with optional DE tool execution
+    pub async fn join_with_de(
         &self,
         left: DataFrame,
         right: DataFrame,
         on: &[String],
         join_type: &str,
+        de_context: Option<&ToolExecutionContext>,
     ) -> Result<DataFrame> {
+        // Execute DE tools before join if requested
+        if let Some(ctx) = de_context {
+            // Validate join keys if requested
+            for validation in &ctx.join_validations {
+                if validation.join_type == join_type {
+                    let join_keys: HashMap<String, String> = on.iter()
+                        .map(|key| (key.clone(), key.clone()))
+                        .collect();
+                    
+                    if let Err(e) = DeExecutor::execute_validate_join_keys(
+                        &left,
+                        &right,
+                        &validation.left_table,
+                        &validation.right_table,
+                        &join_keys,
+                        join_type,
+                    ) {
+                        println!("      ⚠️  Join validation warning: {}", e);
+                    }
+                }
+            }
+            
+            // Validate schema if requested
+            for validation in &ctx.schema_validations {
+                let join_keys: HashMap<String, String> = on.iter()
+                    .map(|key| (key.clone(), key.clone()))
+                    .collect();
+                
+                if let Err(e) = DeExecutor::execute_validate_schema(
+                    &left,
+                    &right,
+                    &validation.left_table,
+                    &validation.right_table,
+                    &join_keys,
+                ) {
+                    println!("      ⚠️  Schema validation warning: {}", e);
+                }
+            }
+        }
+        
         let row_count_before = left.height();
         let left_lazy = left.lazy();
         let right_lazy = right.lazy();
@@ -110,9 +175,9 @@ impl RelationalEngine {
             .collect()
             .map_err(|e| RcaError::Execution(format!("Join failed: {}", e)))?;
         
-        // Check for join explosion
+        // Check for join explosion - increased threshold for multi-grain scenarios
         let row_count_after = result.height();
-        if row_count_after > row_count_before * 10 {
+        if row_count_after > row_count_before * 50 {
             return Err(RcaError::Execution(format!(
                 "Join explosion detected: {} rows -> {} rows",
                 row_count_before, row_count_after
@@ -120,6 +185,17 @@ impl RelationalEngine {
         }
         
         Ok(result)
+    }
+    
+    /// Join without DE tools (backward compatibility)
+    pub async fn join(
+        &self,
+        left: DataFrame,
+        right: DataFrame,
+        on: &[String],
+        join_type: &str,
+    ) -> Result<DataFrame> {
+        self.join_with_de(left, right, on, join_type, None).await
     }
     
     async fn filter(&self, df: DataFrame, expr: &str) -> Result<DataFrame> {

@@ -1,0 +1,16 @@
+{
+  "canonical_keys": [
+    {
+      "entity": "loan",
+      "canonical": "loan_id",
+      "alternates": []
+    },
+    {
+      "entity": "customer",
+      "canonical": "customer_id",
+      "alternates": []
+    }
+  ],
+  "key_mappings": []
+}
+

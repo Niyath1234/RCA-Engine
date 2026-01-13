@@ -1,0 +1,39 @@
+[
+  {
+    "id": "system_a_complex_tos",
+    "system": "system_a",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Complex TOS calculation: SUM(emi_amount) - SUM(transaction_amount) + SUM(penalty_amount) - SUM(charge_amount) + SUM(adjustment_amount) grouped by loan_id",
+      "source_entities": ["loan", "emi", "transaction", "penalty", "charge", "adjustment"],
+      "attributes_needed": {
+        "emi": ["loan_id", "emi_number", "emi_amount"],
+        "transaction": ["loan_id", "emi_number", "transaction_amount"],
+        "penalty": ["loan_id", "penalty_amount"],
+        "charge": ["loan_id", "charge_amount"],
+        "adjustment": ["loan_id", "adjustment_amount"]
+      },
+      "formula": "SUM(emi_amount - COALESCE(transaction_amount, 0) + COALESCE(penalty_amount, 0) - COALESCE(charge_amount, 0) + COALESCE(adjustment_amount, 0))",
+      "aggregation_grain": ["loan_id"]
+    }
+  },
+  {
+    "id": "system_b_tos",
+    "system": "system_b",
+    "metric": "tos",
+    "target_entity": "loan",
+    "target_grain": ["loan_id"],
+    "computation": {
+      "description": "Total Outstanding from pre-computed loan summary",
+      "source_entities": ["loan"],
+      "attributes_needed": {
+        "loan": ["loan_id", "total_outstanding"]
+      },
+      "formula": "total_outstanding",
+      "aggregation_grain": ["loan_id"]
+    }
+  }
+]
+
