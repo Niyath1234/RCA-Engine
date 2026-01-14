@@ -6,4 +6,7 @@ Cargo.lock
 data/*.parquet
 !data/.gitkeep
 
+# Large CSV files - too large for GitHub
+tables/
+
 
