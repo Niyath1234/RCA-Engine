@@ -1,0 +1,19 @@
+[
+  {
+    "id": "recovery",
+    "name": "Recovery Amount",
+    "description": "Total recovery amount (paid_amount) from payments",
+    "grain": ["uuid"],
+    "precision": 2,
+    "null_policy": "zero",
+    "unit": "currency",
+    "labels": ["recovery", "payments", "reconciliation"],
+    "versions": [
+      {
+        "version": "v1",
+        "description": "Standard recovery calculation as sum of paid_amount"
+      }
+    ]
+  }
+]
+

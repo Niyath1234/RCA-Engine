@@ -1,0 +1,92 @@
+{
+  "tables": [
+    {
+      "name": "repayments",
+      "entity": "payment",
+      "primary_key": ["repay_id"],
+      "time_column": "created_at",
+      "system": "system_a",
+      "path": "tables/repayments.csv",
+      "description": "Repayment transactions from System A. Contains user_uuid, repay_id, total_amount, and payment dates.",
+      "grain": ["repay_id"],
+      "labels": ["payments", "recovery", "reconciliation"],
+      "columns": {
+        "repay_id": {
+          "type": "string",
+          "description": "Repayment transaction ID"
+        },
+        "user_uuid": {
+          "type": "string",
+          "description": "User UUID identifier"
+        },
+        "total_amount": {
+          "type": "decimal",
+          "description": "Total payment amount"
+        },
+        "created_at": {
+          "type": "timestamp",
+          "description": "Payment creation timestamp"
+        }
+      }
+    },
+    {
+      "name": "lmsdata_emi_payment_view",
+      "entity": "payment",
+      "primary_key": ["id"],
+      "time_column": "payment_date",
+      "system": "system_b",
+      "path": "tables/lmsdata_emi_payment_view.csv",
+      "description": "EMI payment data from System B. Contains uuid, repayment_txn_id, paid_amount, and payment_date.",
+      "grain": ["id"],
+      "labels": ["payments", "recovery", "reconciliation", "emi"],
+      "columns": {
+        "uuid": {
+          "type": "string",
+          "description": "User UUID identifier"
+        },
+        "repayment_txn_id": {
+          "type": "string",
+          "description": "Repayment transaction ID (maps to repayments.repay_id)"
+        },
+        "paid_amount": {
+          "type": "decimal",
+          "description": "Amount paid"
+        },
+        "payment_date": {
+          "type": "date",
+          "description": "Payment date"
+        }
+      }
+    },
+    {
+      "name": "current_month_collection_report",
+      "entity": "collection",
+      "primary_key": ["uuid"],
+      "time_column": "paid_date",
+      "system": "system_a",
+      "path": "tables/current_month_collection_report.csv",
+      "description": "Collection report from System A. Contains uuid, paid_amount, paid_date, and mis_date.",
+      "grain": ["uuid"],
+      "labels": ["collections", "recovery", "reconciliation"],
+      "columns": {
+        "uuid": {
+          "type": "string",
+          "description": "User UUID identifier"
+        },
+        "paid_amount": {
+          "type": "decimal",
+          "description": "Amount paid"
+        },
+        "paid_date": {
+          "type": "date",
+          "description": "Payment date"
+        },
+        "mis_date": {
+          "type": "date",
+          "description": "MIS date for reporting"
+        }
+      }
+    }
+  ]
+}
+

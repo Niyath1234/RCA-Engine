@@ -1,0 +1,23 @@
+[
+  {
+    "type": "edge",
+    "from": "repayments",
+    "to": "lmsdata_emi_payment_view",
+    "keys": {
+      "repay_id": "repayment_txn_id"
+    },
+    "relationship": "one_to_many",
+    "description": "Join repayments to EMI payments via repayment transaction ID"
+  },
+  {
+    "type": "edge",
+    "from": "repayments",
+    "to": "current_month_collection_report",
+    "keys": {
+      "user_uuid": "uuid"
+    },
+    "relationship": "many_to_one",
+    "description": "Join repayments to collections report via user UUID"
+  }
+]
+

@@ -1,0 +1,15 @@
+{
+  "entities": [
+    {
+      "name": "payment",
+      "canonical_columns": {
+        "uuid": ["user_uuid", "uuid"],
+        "paid_amount": ["total_amount", "paid_amount"],
+        "paid_date": ["created_at", "payment_date", "paid_date"],
+        "repayment_id": ["repay_id", "repayment_txn_id"]
+      },
+      "description": "Payment entity with canonical column mappings across systems"
+    }
+  ]
+}
+

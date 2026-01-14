@@ -1,0 +1,30 @@
+{
+  "labels": [
+    {
+      "name": "recovery",
+      "description": "Recovery/payment amounts",
+      "applies_to": ["tables", "rules", "metrics"]
+    },
+    {
+      "name": "payments",
+      "description": "Payment transactions",
+      "applies_to": ["tables", "rules"]
+    },
+    {
+      "name": "collections",
+      "description": "Collection reports and data",
+      "applies_to": ["tables"]
+    },
+    {
+      "name": "digital",
+      "description": "Digital loan products",
+      "applies_to": ["tables", "rules"]
+    },
+    {
+      "name": "reconciliation",
+      "description": "Reconciliation between systems",
+      "applies_to": ["tables", "rules", "metrics"]
+    }
+  ]
+}
+

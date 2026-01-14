@@ -1,0 +1,49 @@
+[
+  {
+    "id": "system_a_recovery_rule",
+    "system": "system_a",
+    "metric": "recovery",
+    "target_entity": "payment",
+    "target_grain": ["uuid"],
+    "computation": {
+      "description": "Recovery calculation from System A repayments table",
+      "source_entities": ["payment"],
+      "source_table": "repayments",
+      "attributes_needed": {
+        "payment": ["user_uuid", "total_amount", "created_at"]
+      },
+      "formula": "sum(total_amount)",
+      "aggregation_grain": ["user_uuid"],
+      "filter_conditions": {
+        "created_at": "IS NOT NULL",
+        "total_amount": "IS NOT NULL"
+      },
+      "note": "Maps user_uuid to uuid, total_amount to paid_amount, created_at to paid_date"
+    },
+    "labels": ["recovery", "payments", "system_a"]
+  },
+  {
+    "id": "system_b_recovery_rule",
+    "system": "system_b",
+    "metric": "recovery",
+    "target_entity": "payment",
+    "target_grain": ["uuid"],
+    "computation": {
+      "description": "Recovery calculation from System B EMI payments",
+      "source_entities": ["payment"],
+      "source_table": "lmsdata_emi_payment_view",
+      "attributes_needed": {
+        "payment": ["uuid", "paid_amount", "payment_date"]
+      },
+      "formula": "sum(paid_amount)",
+      "aggregation_grain": ["uuid"],
+      "filter_conditions": {
+        "payment_date": "IS NOT NULL",
+        "paid_amount": "IS NOT NULL"
+      },
+      "note": "Direct mapping: uuid, paid_amount, payment_date"
+    },
+    "labels": ["recovery", "payments", "system_b"]
+  }
+]
+
