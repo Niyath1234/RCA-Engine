@@ -1,0 +1,128 @@
+{
+  "tables": [
+    {
+      "upload": {
+        "table_name": "khatabook_customers",
+        "csv_path": "test_data/khatabook_customers.csv",
+        "primary_keys": [
+          "customer_id"
+        ],
+        "column_descriptions": {
+          "customer_id": "Unique customer identifier",
+          "total_outstanding": "Total amount customer owes"
+        }
+      },
+      "schema": {
+        "columns": [
+          {
+            "name": "customer_id",
+            "data_type": "String",
+            "description": "Unique customer identifier"
+          },
+          {
+            "name": "customer_name",
+            "data_type": "String",
+            "description": null
+          },
+          {
+            "name": "total_outstanding",
+            "data_type": "Float64",
+            "description": "Total amount customer owes"
+          },
+          {
+            "name": "as_of_date",
+            "data_type": "String",
+            "description": null
+          }
+        ]
+      },
+      "table_prefix": "khatabook",
+      "row_count": 6
+    },
+    {
+      "upload": {
+        "table_name": "tb_loan_details",
+        "csv_path": "test_data/tb_loan_details.csv",
+        "primary_keys": [
+          "loan_id"
+        ],
+        "column_descriptions": {
+          "customer_id": "Customer who owns this loan",
+          "loan_id": "Unique loan identifier"
+        }
+      },
+      "schema": {
+        "columns": [
+          {
+            "name": "loan_id",
+            "data_type": "String",
+            "description": "Unique loan identifier"
+          },
+          {
+            "name": "customer_id",
+            "data_type": "String",
+            "description": "Customer who owns this loan"
+          },
+          {
+            "name": "principal_amount",
+            "data_type": "Float64",
+            "description": null
+          },
+          {
+            "name": "interest_amount",
+            "data_type": "Float64",
+            "description": null
+          },
+          {
+            "name": "payment_amount",
+            "data_type": "Float64",
+            "description": null
+          },
+          {
+            "name": "loan_status",
+            "data_type": "String",
+            "description": null
+          }
+        ]
+      },
+      "table_prefix": "tb",
+      "row_count": 7
+    },
+    {
+      "upload": {
+        "table_name": "tb_payments",
+        "csv_path": "test_data/tb_payments.csv",
+        "primary_keys": [
+          "payment_id"
+        ],
+        "column_descriptions": {}
+      },
+      "schema": {
+        "columns": [
+          {
+            "name": "payment_id",
+            "data_type": "String",
+            "description": null
+          },
+          {
+            "name": "loan_id",
+            "data_type": "String",
+            "description": null
+          },
+          {
+            "name": "payment_amount",
+            "data_type": "Float64",
+            "description": null
+          },
+          {
+            "name": "payment_date",
+            "data_type": "String",
+            "description": null
+          }
+        ]
+      },
+      "table_prefix": "tb",
+      "row_count": 7
+    }
+  ]
+}

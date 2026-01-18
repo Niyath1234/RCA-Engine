@@ -1,0 +1,39 @@
+[
+  {
+    "id": "system_a_tos_rule",
+    "system": "system_a",
+    "metric": "tos",
+    "target_entity": "customer",
+    "target_grain": ["customer_id"],
+    "labels": ["tos"],
+    "computation": {
+      "description": "TOS for System A: Total outstanding amount for each customer",
+      "source_entities": ["customer"],
+      "attributes_needed": {
+        "customer": ["customer_id", "total_outstanding"]
+      },
+      "formula": "Total outstanding amount for each customer",
+      "aggregation_grain": ["customer_id"],
+      "filter_conditions": {}
+    }
+  },
+  {
+    "id": "system_b_tos_rule",
+    "system": "system_b",
+    "metric": "tos",
+    "target_entity": "customer",
+    "target_grain": ["customer_id"],
+    "labels": ["tos"],
+    "computation": {
+      "description": "TOS for System B: Total outstanding amount for each customer",
+      "source_entities": ["customer"],
+      "attributes_needed": {
+        "customer": ["customer_id", "total_outstanding"]
+      },
+      "formula": "Total outstanding amount for each customer",
+      "aggregation_grain": ["customer_id"],
+      "filter_conditions": {}
+    }
+  }
+]
+

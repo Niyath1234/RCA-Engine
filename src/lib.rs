@@ -41,6 +41,9 @@ pub mod core;
 pub mod sql_engine;
 pub mod graph_traversal;
 pub mod agent_prompts;
+pub mod table_upload;
+pub mod simplified_intent;
+pub mod simplified_api;
 
 // Re-export Hypergraph module
 #[path = "../Hypergraph/mod.rs"]

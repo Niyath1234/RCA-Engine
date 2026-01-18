@@ -1,0 +1,29 @@
+[
+  {
+    "name": "customer_tos_a",
+    "system": "system_a",
+    "entity": "customer",
+    "primary_key": ["customer_id"],
+    "columns": [
+      {"name": "customer_id", "type": "string", "description": "Customer identifier"},
+      {"name": "tos", "type": "float", "description": "Total outstanding amount"},
+      {"name": "as_of_date", "type": "string", "description": "Date of the record"}
+    ],
+    "path": "customer_tos_a.csv",
+    "time_column": "as_of_date"
+  },
+  {
+    "name": "customer_tos_b",
+    "system": "system_b",
+    "entity": "customer",
+    "primary_key": ["customer_id"],
+    "columns": [
+      {"name": "customer_id", "type": "string", "description": "Customer identifier"},
+      {"name": "tos", "type": "float", "description": "Total outstanding amount"},
+      {"name": "as_of_date", "type": "string", "description": "Date of the record"}
+    ],
+    "path": "customer_tos_b.csv",
+    "time_column": "as_of_date"
+  }
+]
+

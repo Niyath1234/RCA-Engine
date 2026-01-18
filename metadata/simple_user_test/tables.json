@@ -1,0 +1,27 @@
+[
+  {
+    "name": "customer_tos_system_a",
+    "system": "system_a",
+    "entity": "customer",
+    "primary_key": ["customer_id"],
+    "columns": [
+      {"name": "customer_id", "type": "string"},
+      {"name": "total_outstanding", "type": "float"},
+      {"name": "date", "type": "string"}
+    ],
+    "path": "customer_tos_system_a.csv"
+  },
+  {
+    "name": "customer_tos_system_b",
+    "system": "system_b",
+    "entity": "customer",
+    "primary_key": ["customer_id"],
+    "columns": [
+      {"name": "customer_id", "type": "string"},
+      {"name": "total_outstanding", "type": "float"},
+      {"name": "date", "type": "string"}
+    ],
+    "path": "customer_tos_system_b.csv"
+  }
+]
+
