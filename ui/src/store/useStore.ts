@@ -41,8 +41,8 @@ interface AppState {
   clearReasoning: () => void;
 
   // View mode
-  viewMode: 'pipelines' | 'reasoning' | 'monitoring';
-  setViewMode: (mode: 'pipelines' | 'reasoning' | 'monitoring') => void;
+  viewMode: 'pipelines' | 'reasoning' | 'rules' | 'monitoring';
+  setViewMode: (mode: 'pipelines' | 'reasoning' | 'rules' | 'monitoring') => void;
 }
 
 export const useStore = create<AppState>((set) => ({

@@ -21,8 +21,21 @@ export const pipelineAPI = {
 
 // Reasoning API
 export const reasoningAPI = {
+  // Original query endpoint (direct execution)
   query: (query: string, context?: any) =>
     apiClient.post('/api/reasoning/query', { query, context }),
+  
+  // NEW: Assess query confidence (fail-fast check)
+  // Returns clarification request if confidence is low
+  assess: (query: string) =>
+    apiClient.post('/api/reasoning/assess', { query }),
+  
+  // NEW: Submit clarification answer
+  // Combines original query with user's answer
+  clarify: (query: string, answer: string) =>
+    apiClient.post('/api/reasoning/clarify', { query, answer }),
+  
+  // Streaming responses
   stream: (query: string) => {
     // For streaming responses
     return fetch(`${API_BASE_URL}/api/reasoning/stream`, {
@@ -32,6 +45,44 @@ export const reasoningAPI = {
     });
   },
 };
+
+// Types for clarification flow
+export interface ClarificationRequest {
+  status: 'needs_clarification';
+  needs_clarification: true;
+  question: string;
+  missing_pieces: Array<{
+    field: string;
+    description: string;
+    importance: 'Required' | 'Helpful';
+    suggestions: string[];
+  }>;
+  confidence: number;
+  partial_understanding: {
+    task_type: string | null;
+    systems: string[];
+    metrics: string[];
+    entities: string[];
+    grain: string[];
+    keywords: string[];
+  };
+  response_hints: string[];
+}
+
+export interface AssessmentSuccess {
+  status: 'success';
+  needs_clarification: false;
+  intent: any;
+  message: string;
+}
+
+export interface AssessmentFailed {
+  status: 'failed';
+  needs_clarification: false;
+  error: string;
+}
+
+export type AssessmentResponse = ClarificationRequest | AssessmentSuccess | AssessmentFailed;
 
 // Ingestion API
 export const ingestionAPI = {

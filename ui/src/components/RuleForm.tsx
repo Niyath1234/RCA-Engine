@@ -12,7 +12,6 @@ import {
   Alert,
   Paper,
   CircularProgress,
-  Autocomplete,
 } from '@mui/material';
 import { Visibility as VisibilityIcon, HelpOutline as HelpIcon } from '@mui/icons-material';
 import { rulesAPI, reasoningAPI } from '../api/client';

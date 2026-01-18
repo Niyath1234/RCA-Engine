@@ -12,13 +12,16 @@ import {
   TableRow,
   Paper,
   Button,
+  Chip,
 } from '@mui/material';
 import {
   Send as SendIcon,
   Download as DownloadIcon,
+  HelpOutline as HelpIcon,
+  CheckCircle as CheckIcon,
 } from '@mui/icons-material';
 import { useStore } from '../store/useStore';
-import { reasoningAPI } from '../api/client';
+import { reasoningAPI, ClarificationRequest } from '../api/client';
 
 // Helper function to parse CSV or tabular data
 const parseTableData = (content: string): { headers: string[], rows: string[][] } | null => {
@@ -105,6 +108,13 @@ export const ReasoningChat: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Clarification state
+  const [pendingClarification, setPendingClarification] = useState<{
+    originalQuery: string;
+    clarification: ClarificationRequest;
+  } | null>(null);
+  const [useFastFail] = useState(true); // Toggle for fail-fast mode (can be made configurable)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -114,9 +124,184 @@ export const ReasoningChat: React.FC = () => {
     scrollToBottom();
   }, [reasoningSteps]);
 
+  // Handle sending clarification answer
+  const handleClarificationAnswer = async () => {
+    if (!input.trim() || isLoading || !pendingClarification) return;
+
+    const answer = input.trim();
+    setInput('');
+    setIsLoading(true);
+
+    // Add user's answer
+    addReasoningStep({
+      id: `user-answer-${Date.now()}`,
+      type: 'action',
+      content: `📝 Clarification: ${answer}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      // First try clarify endpoint
+      const clarifyResponse = await reasoningAPI.clarify(
+        pendingClarification.originalQuery,
+        answer
+      );
+
+      if (clarifyResponse.data.status === 'success') {
+        // Clear clarification state
+        setPendingClarification(null);
+        
+        addReasoningStep({
+          id: `clarified-${Date.now()}`,
+          type: 'thought',
+          content: '✅ Query understood with clarification. Executing analysis...',
+          timestamp: new Date().toISOString(),
+        });
+
+        // Now execute the actual query with combined context
+        const combinedQuery = `${pendingClarification.originalQuery} (Additional context: ${answer})`;
+        await executeQuery(combinedQuery);
+      } else if (clarifyResponse.data.status === 'needs_clarification') {
+        // Still needs more info
+        setPendingClarification({
+          originalQuery: pendingClarification.originalQuery,
+          clarification: clarifyResponse.data as ClarificationRequest,
+        });
+        
+        addReasoningStep({
+          id: `still-needs-${Date.now()}`,
+          type: 'thought',
+          content: `🤔 Still need more information: ${clarifyResponse.data.question}`,
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        // Failed
+        addReasoningStep({
+          id: `error-${Date.now()}`,
+          type: 'error',
+          content: clarifyResponse.data.error || 'Failed to process clarification',
+          timestamp: new Date().toISOString(),
+        });
+        setPendingClarification(null);
+      }
+    } catch (error: any) {
+      addReasoningStep({
+        id: `error-${Date.now()}`,
+        type: 'error',
+        content: error.message || 'Failed to process clarification',
+        timestamp: new Date().toISOString(),
+      });
+      setPendingClarification(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Process query response from API
+  const processQueryResponse = async (response: any, _query: string) => {
+    const responseData = response.data;
+    let stepsToShow: Array<{type: 'thought' | 'action' | 'result' | 'error', content: string}> = [];
+    
+    if (responseData?.steps && Array.isArray(responseData.steps)) {
+      stepsToShow = responseData.steps.map((s: any) => ({
+        type: s.type || 'thought',
+        content: s.content || '',
+      }));
+      
+      if (responseData?.result && typeof responseData.result === 'string') {
+        let lastResultIndex = -1;
+        for (let i = stepsToShow.length - 1; i >= 0; i--) {
+          if (stepsToShow[i].type === 'result') {
+            lastResultIndex = i;
+            break;
+          }
+        }
+        if (lastResultIndex >= 0) {
+          stepsToShow[lastResultIndex].content = responseData.result;
+        } else {
+          stepsToShow.push({ type: 'result', content: responseData.result });
+        }
+      }
+    } else {
+      const resultText = responseData?.result || 'Analysis complete.';
+      stepsToShow = [{ type: 'result' as const, content: resultText }];
+    }
+
+    for (const step of stepsToShow) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      addReasoningStep({
+        id: `step-${Date.now()}-${Math.random()}`,
+        type: step.type,
+        content: step.content,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  };
+
+  // Handle offline/mock mode
+  const handleOfflineMode = async (query: string) => {
+    console.log('API not available, using mock reasoning');
+    const queryLower = query.toLowerCase();
+    const hasMismatch = queryLower.includes('mismatch') || queryLower.includes('difference');
+    
+    const steps = [
+      { type: 'thought' as const, content: `Analyzing query: "${query}"` },
+      { type: 'thought' as const, content: 'Processing in offline mode...' },
+      { type: 'result' as const, content: hasMismatch 
+        ? 'Found potential mismatches. Connect to server for full analysis.'
+        : 'Query analysis complete. Connect to server for full execution.' 
+      },
+    ];
+
+    for (const step of steps) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      addReasoningStep({
+        id: `step-${Date.now()}-${Math.random()}`,
+        type: step.type,
+        content: step.content,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  };
+
+  // Execute query directly (skip assessment)
+  const executeQuery = async (query: string) => {
+    try {
+      const response = await reasoningAPI.query(query);
+      await processQueryResponse(response, query);
+    } catch (error: any) {
+      if (error.code === 'ERR_NETWORK') {
+        await handleOfflineMode(query);
+      } else {
+        addReasoningStep({
+          id: `error-${Date.now()}`,
+          type: 'error',
+          content: error.message || 'An error occurred',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  };
+
+  // Cancel clarification and start fresh
+  const cancelClarification = () => {
+    setPendingClarification(null);
+    addReasoningStep({
+      id: `cancel-${Date.now()}`,
+      type: 'thought',
+      content: '❌ Clarification cancelled. You can ask a new question.',
+      timestamp: new Date().toISOString(),
+    });
+  };
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
+
+    // If we're in clarification mode, handle the answer
+    if (pendingClarification) {
+      await handleClarificationAnswer();
+      return;
+    }
 
     const userQuery = input.trim();
     setInput('');
@@ -131,7 +316,91 @@ export const ReasoningChat: React.FC = () => {
     });
 
     try {
-      // Call the API
+      // If fail-fast mode is enabled, first assess the query
+      if (useFastFail) {
+        addReasoningStep({
+          id: `assess-${Date.now()}`,
+          type: 'thought',
+          content: '🔍 Assessing query confidence...',
+          timestamp: new Date().toISOString(),
+        });
+
+        try {
+          const assessResponse = await reasoningAPI.assess(userQuery);
+          
+          if (assessResponse.data.needs_clarification) {
+            // Need clarification - show question
+            const clarification = assessResponse.data as ClarificationRequest;
+            setPendingClarification({
+              originalQuery: userQuery,
+              clarification,
+            });
+            
+            // Show confidence
+            addReasoningStep({
+              id: `confidence-${Date.now()}`,
+              type: 'thought',
+              content: `📊 Confidence: ${Math.round(clarification.confidence * 100)}% (below threshold)`,
+              timestamp: new Date().toISOString(),
+            });
+            
+            // Show what we understood
+            const partial = clarification.partial_understanding;
+            const understood: string[] = [];
+            if (partial.task_type) understood.push(`Task: ${partial.task_type}`);
+            if (partial.metrics.length) understood.push(`Metrics: ${partial.metrics.join(', ')}`);
+            if (partial.systems.length) understood.push(`Systems: ${partial.systems.join(', ')}`);
+            
+            if (understood.length > 0) {
+              addReasoningStep({
+                id: `partial-${Date.now()}`,
+                type: 'thought',
+                content: `✅ Understood: ${understood.join(' | ')}`,
+                timestamp: new Date().toISOString(),
+              });
+            }
+            
+            // Show the clarification question
+            addReasoningStep({
+              id: `question-${Date.now()}`,
+              type: 'result',
+              content: `🤔 **Clarification Needed**\n\n${clarification.question}\n\n${
+                clarification.missing_pieces.length > 0 
+                  ? `**Missing information:**\n${clarification.missing_pieces.map(p => 
+                      `• ${p.field} (${p.importance}): ${p.description}${
+                        p.suggestions.length > 0 ? ` — e.g., ${p.suggestions.join(', ')}` : ''
+                      }`
+                    ).join('\n')}`
+                  : ''
+              }`,
+              timestamp: new Date().toISOString(),
+            });
+            
+            setIsLoading(false);
+            return;
+          }
+          
+          // Assessment successful - proceed with execution
+          addReasoningStep({
+            id: `assess-ok-${Date.now()}`,
+            type: 'thought',
+            content: '✅ Query understood. Proceeding with analysis...',
+            timestamp: new Date().toISOString(),
+          });
+          
+        } catch (assessError: any) {
+          // Assessment failed - fallback to direct execution
+          console.log('Assessment failed, falling back to direct execution:', assessError);
+          addReasoningStep({
+            id: `assess-fallback-${Date.now()}`,
+            type: 'thought',
+            content: '⚠️ Assessment unavailable. Proceeding with direct execution...',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Call the API directly
       const response = await reasoningAPI.query(userQuery);
 
       // Parse response - check if it has steps array
@@ -711,6 +980,39 @@ cargo run --bin rca-engine run "${userQuery}" --metadata-dir ./metadata --data-d
         <div ref={messagesEndRef} />
       </Box>
 
+      {/* Clarification Mode Banner */}
+      {pendingClarification && (
+        <Box
+          sx={{
+            p: 1.5,
+            borderTop: '1px solid #30363D',
+            backgroundColor: 'rgba(255, 107, 53, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <HelpIcon sx={{ color: '#FF6B35', fontSize: 18 }} />
+            <Typography variant="caption" sx={{ color: '#FF6B35', fontWeight: 500 }}>
+              Awaiting clarification for: "{pendingClarification.originalQuery.substring(0, 50)}..."
+            </Typography>
+          </Box>
+          <Button
+            size="small"
+            onClick={cancelClarification}
+            sx={{
+              color: '#8B949E',
+              fontSize: '0.7rem',
+              textTransform: 'none',
+              '&:hover': { color: '#E6EDF3' },
+            }}
+          >
+            Cancel
+          </Button>
+        </Box>
+      )}
+
       {/* Input */}
       <Box
         sx={{
@@ -722,7 +1024,11 @@ cargo run --bin rca-engine run "${userQuery}" --metadata-dir ./metadata --data-d
         <Box sx={{ display: 'flex', gap: 1 }}>
           <TextField
             fullWidth
-            placeholder="Ask a question or request analysis..."
+            placeholder={
+              pendingClarification 
+                ? "Type your answer to the clarification question..."
+                : "Ask a question or request analysis..."
+            }
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => {
@@ -737,8 +1043,10 @@ cargo run --bin rca-engine run "${userQuery}" --metadata-dir ./metadata --data-d
             sx={{
               '& .MuiOutlinedInput-root': {
                 color: '#E6EDF3',
-                backgroundColor: '#0D1117',
-                '& fieldset': { borderColor: '#30363D' },
+                backgroundColor: pendingClarification ? 'rgba(255, 107, 53, 0.05)' : '#0D1117',
+                '& fieldset': { 
+                  borderColor: pendingClarification ? '#FF6B35' : '#30363D' 
+                },
                 '&:hover fieldset': { borderColor: '#FF6B35' },
               },
             }}
@@ -747,18 +1055,47 @@ cargo run --bin rca-engine run "${userQuery}" --metadata-dir ./metadata --data-d
             onClick={handleSend}
             disabled={!input.trim() || isLoading}
             sx={{
-              backgroundColor: '#FF6B35',
-              color: '#0D1117',
-              '&:hover': { backgroundColor: '#E55A2B' },
+              backgroundColor: pendingClarification ? '#2EA043' : '#FF6B35',
+              color: '#FFFFFF',
+              '&:hover': { 
+                backgroundColor: pendingClarification ? '#238636' : '#E55A2B' 
+              },
               '&:disabled': {
                 backgroundColor: '#30363D',
                 color: '#6E7681',
               },
             }}
           >
-            <SendIcon />
+            {pendingClarification ? <CheckIcon /> : <SendIcon />}
           </IconButton>
         </Box>
+        
+        {/* Response hints */}
+        {pendingClarification && pendingClarification.clarification.response_hints.length > 0 && (
+          <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+            <Typography variant="caption" sx={{ color: '#6E7681', mr: 1 }}>
+              Suggestions:
+            </Typography>
+            {pendingClarification.clarification.response_hints.slice(0, 4).map((hint, idx) => (
+              <Chip
+                key={idx}
+                label={hint}
+                size="small"
+                onClick={() => setInput(hint)}
+                sx={{
+                  backgroundColor: '#21262D',
+                  color: '#8B949E',
+                  fontSize: '0.65rem',
+                  height: 20,
+                  '&:hover': {
+                    backgroundColor: '#30363D',
+                    color: '#E6EDF3',
+                  },
+                }}
+              />
+            ))}
+          </Box>
+        )}
       </Box>
     </Box>
   );

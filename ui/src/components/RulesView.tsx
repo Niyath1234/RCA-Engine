@@ -7,7 +7,6 @@ import {
   Menu,
   MenuItem,
   Chip,
-  Divider,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -331,11 +330,11 @@ export const RulesView: React.FC = () => {
         rule={editingRule ? {
           id: editingRule.id,
           description: getRuleDescription(editingRule),
-          note: editingRule.note || editingRule.description,
+          note: editingRule.note || editingRule.description || '',
           labels: getRuleLabels(editingRule),
           filter_conditions: editingRule.filter_conditions || {},
-          parent_schema: editingRule.parent_schema,
-          child_table: editingRule.child_table,
+          parent_schema: editingRule.parent_schema || '',
+          child_table: editingRule.child_table || '',
         } : null}
       />
     </Box>

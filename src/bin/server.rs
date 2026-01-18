@@ -11,6 +11,7 @@ use rca_engine::llm::LlmClient;
 use rca_engine::graph_traversal::GraphTraversalAgent;
 use rca_engine::sql_engine::SqlEngine;
 use rca_engine::graph::Hypergraph;
+use rca_engine::intent_compiler::{IntentCompiler, IntentCompilationResult};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -148,6 +149,158 @@ async fn handle_request(request: &str) -> String {
             // Simple CSV upload handler
             create_response(200, "OK", r#"{"success":true,"message":"CSV uploaded successfully. Processing will create nodes and edges automatically.","records":0}"#)
         }
+        // ====================================================================
+        // NEW: FAIL-FAST CLARIFICATION ENDPOINT
+        // ====================================================================
+        ("POST", "/api/reasoning/assess") => {
+            // Assess query confidence and return clarification if needed
+            let body_start = request.find("\r\n\r\n").unwrap_or(request.len());
+            let body = &request[body_start..].trim();
+            
+            let query = if let Some(json_start) = body.find('{') {
+                let json_str = &body[json_start..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    json.get("query")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            
+            if query.is_empty() {
+                return create_response(400, "Bad Request", r#"{"error":"Query is required"}"#);
+            }
+            
+            // Use fail-fast with clarification
+            let result = assess_and_compile_query(&query, None).await;
+            
+            match result {
+                Ok(compilation_result) => {
+                    let response_json = match compilation_result {
+                        IntentCompilationResult::Success(intent) => {
+                            serde_json::json!({
+                                "status": "success",
+                                "needs_clarification": false,
+                                "intent": intent,
+                                "message": "Query understood. Ready to execute."
+                            })
+                        }
+                        IntentCompilationResult::NeedsClarification(clarification) => {
+                            serde_json::json!({
+                                "status": "needs_clarification",
+                                "needs_clarification": true,
+                                "question": clarification.question,
+                                "missing_pieces": clarification.missing_pieces,
+                                "confidence": clarification.confidence,
+                                "partial_understanding": clarification.partial_understanding,
+                                "response_hints": clarification.response_hints,
+                                "message": "Please provide additional information."
+                            })
+                        }
+                        IntentCompilationResult::Failed(msg) => {
+                            serde_json::json!({
+                                "status": "failed",
+                                "needs_clarification": false,
+                                "error": msg,
+                                "message": "Failed to understand query."
+                            })
+                        }
+                    };
+                    create_response(200, "OK", &serde_json::to_string(&response_json).unwrap())
+                }
+                Err(e) => {
+                    let error_json = serde_json::json!({
+                        "status": "error",
+                        "error": e.to_string()
+                    });
+                    create_response(500, "Internal Server Error", &serde_json::to_string(&error_json).unwrap())
+                }
+            }
+        }
+        // ====================================================================
+        // NEW: COMPILE WITH CLARIFICATION ANSWER
+        // ====================================================================
+        ("POST", "/api/reasoning/clarify") => {
+            // Compile with user's answer to clarification question
+            let body_start = request.find("\r\n\r\n").unwrap_or(request.len());
+            let body = &request[body_start..].trim();
+            
+            let (query, answer) = if let Some(json_start) = body.find('{') {
+                let json_str = &body[json_start..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    let q = json.get("query")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let a = json.get("answer")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    (q, a)
+                } else {
+                    (String::new(), String::new())
+                }
+            } else {
+                (String::new(), String::new())
+            };
+            
+            if query.is_empty() {
+                return create_response(400, "Bad Request", r#"{"error":"Original query is required"}"#);
+            }
+            if answer.is_empty() {
+                return create_response(400, "Bad Request", r#"{"error":"Clarification answer is required"}"#);
+            }
+            
+            // Compile with answer
+            let result = assess_and_compile_query(&query, Some(&answer)).await;
+            
+            match result {
+                Ok(compilation_result) => {
+                    let response_json = match compilation_result {
+                        IntentCompilationResult::Success(intent) => {
+                            serde_json::json!({
+                                "status": "success",
+                                "needs_clarification": false,
+                                "intent": intent,
+                                "message": "Query understood with clarification. Ready to execute."
+                            })
+                        }
+                        IntentCompilationResult::NeedsClarification(clarification) => {
+                            // Still needs more info even after clarification
+                            serde_json::json!({
+                                "status": "needs_clarification",
+                                "needs_clarification": true,
+                                "question": clarification.question,
+                                "missing_pieces": clarification.missing_pieces,
+                                "confidence": clarification.confidence,
+                                "message": "Still need more information."
+                            })
+                        }
+                        IntentCompilationResult::Failed(msg) => {
+                            serde_json::json!({
+                                "status": "failed",
+                                "error": msg
+                            })
+                        }
+                    };
+                    create_response(200, "OK", &serde_json::to_string(&response_json).unwrap())
+                }
+                Err(e) => {
+                    let error_json = serde_json::json!({
+                        "status": "error",
+                        "error": e.to_string()
+                    });
+                    create_response(500, "Internal Server Error", &serde_json::to_string(&error_json).unwrap())
+                }
+            }
+        }
+        // ====================================================================
+        // ORIGINAL REASONING/QUERY ENDPOINT (kept for backward compatibility)
+        // ====================================================================
         ("POST", "/api/reasoning/query") => {
             // Extract query from body
             let body_start = request.find("\r\n\r\n").unwrap_or(request.len());
@@ -513,6 +666,39 @@ fn get_knowledge_base() -> Result<String, Box<dyn std::error::Error>> {
     
     let content = std::fs::read_to_string(&knowledge_base_path)?;
     Ok(content)
+}
+
+// ============================================================================
+// FAIL-FAST CLARIFICATION HELPER
+// ============================================================================
+
+/// Assess query confidence and compile with optional clarification answer
+async fn assess_and_compile_query(
+    query: &str,
+    answer: Option<&str>,
+) -> Result<IntentCompilationResult, Box<dyn std::error::Error>> {
+    // Check for API key
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OpenAI API key not found. Set OPENAI_API_KEY environment variable.")?;
+    
+    let model = std::env::var("OPENAI_MODEL")
+        .unwrap_or_else(|_| "gpt-4".to_string());
+    let api_url = std::env::var("OPENAI_API_URL")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    
+    let llm = LlmClient::new(api_key, model, api_url);
+    let compiler = IntentCompiler::new(llm)
+        .with_confidence_threshold(0.7)  // 70% confidence required
+        .with_fail_fast(true);           // Enable fail-fast
+    
+    // Compile with or without answer
+    let result = if let Some(ans) = answer {
+        compiler.compile_with_answer(query, ans).await?
+    } else {
+        compiler.compile_with_clarification(query).await?
+    };
+    
+    Ok(result)
 }
 
 fn create_response(status: u16, status_text: &str, body: &str) -> String {
