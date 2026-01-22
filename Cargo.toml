@@ -55,11 +55,15 @@ dashmap = "7.0.0-rc2"
 # bincode = "1.3"
 # zstd = "0.13"
 
+# PostgreSQL support
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+
 [[bin]]
 name = "server"
 path = "src/bin/server.rs"
 
 [[bin]]
+<<<<<<< HEAD
 name = "load_tables_data"
 path = "load_tables_data.rs"
 
@@ -70,4 +74,12 @@ path = "load_scf_data.rs"
 [[bin]]
 name = "create_test_tables"
 path = "create_test_tables.rs"
+=======
+name = "test_db_connection"
+path = "src/bin/test_db_connection.rs"
+
+[[bin]]
+name = "migrate_metadata"
+path = "src/bin/migrate_metadata.rs"
+>>>>>>> 7bc4db6f556db1b1260a0489f0a154f4be030245
 
