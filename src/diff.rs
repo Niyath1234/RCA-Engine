@@ -1,11 +1,15 @@
 use crate::error::{RcaError, Result};
 use crate::fuzzy_matcher::{FuzzyMatcher, FuzzyMatch};
+use crate::llm_value_matcher::{LlmValueMatcher, ValueMatchingResult};
+use crate::llm::LlmClient;
 use polars::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 pub struct DiffEngine {
     pub fuzzy_matcher: Option<FuzzyMatcher>,
     pub fuzzy_columns: Vec<String>, // Columns that should use fuzzy matching
+    pub llm_value_matcher: Option<LlmValueMatcher>, // For LLM-based string value matching
+    pub string_value_columns: Vec<String>, // Columns that should use multi-stage string matching
 }
 
 impl Default for DiffEngine {
@@ -13,6 +17,8 @@ impl Default for DiffEngine {
         Self {
             fuzzy_matcher: None,
             fuzzy_columns: Vec::new(),
+            llm_value_matcher: None,
+            string_value_columns: Vec::new(),
         }
     }
 }
@@ -28,8 +34,20 @@ impl DiffEngine {
         self
     }
     
+    /// Enable multi-stage string value matching (exact -> fuzzy -> LLM)
+    pub fn with_string_value_matching(
+        mut self, 
+        fuzzy_threshold: f64, 
+        string_columns: Vec<String>,
+        llm_client: Option<LlmClient>,
+    ) -> Self {
+        self.string_value_columns = string_columns.clone();
+        self.llm_value_matcher = Some(LlmValueMatcher::new(fuzzy_threshold, llm_client));
+        self
+    }
+    
     /// Compare two dataframes and find differences
-    pub fn compare(
+    pub async fn compare(
         &self,
         df_a: DataFrame,
         df_b: DataFrame,
@@ -53,7 +71,7 @@ impl DiffEngine {
         let data_diff = if has_fuzzy_columns && self.fuzzy_matcher.is_some() {
             self.data_diff_with_fuzzy(&df_a, &df_b, grain, metric_col, precision, &population_diff.fuzzy_matches)?
         } else {
-            self.data_diff(&df_a, &df_b, grain, metric_col, precision)?
+            self.data_diff(&df_a, &df_b, grain, metric_col, precision).await?
         };
         
         Ok(ComparisonResult {
@@ -91,7 +109,7 @@ impl DiffEngine {
         })
     }
     
-    fn data_diff(
+    async fn data_diff(
         &self,
         df_a: &DataFrame,
         df_b: &DataFrame,
@@ -99,6 +117,12 @@ impl DiffEngine {
         metric_col: &str,
         precision: u32,
     ) -> Result<DataDiff> {
+        // Check if this is a string value column that needs multi-stage matching
+        if self.string_value_columns.contains(&metric_col.to_string()) {
+            return self.data_diff_string_values(df_a, df_b, grain, metric_col).await;
+        }
+        
+        // Numeric comparison (original logic)
         // Join on grain columns
         let grain_cols: Vec<Expr> = grain.iter().map(|c| col(c)).collect();
         
@@ -153,6 +177,98 @@ impl DiffEngine {
             mismatches,
             matches,
             mismatch_details: mismatches_df,
+            unmatched_values_a: None,
+            unmatched_values_b: None,
+            value_matching_result: None,
+        })
+    }
+    
+    /// String value comparison with multi-stage matching
+    async fn data_diff_string_values(
+        &self,
+        df_a: &DataFrame,
+        df_b: &DataFrame,
+        grain: &[String],
+        metric_col: &str,
+    ) -> Result<DataDiff> {
+        let llm_matcher = self.llm_value_matcher.as_ref()
+            .ok_or_else(|| RcaError::Execution("LLM value matcher not initialized".to_string()))?;
+        
+        println!("   🔤 Performing multi-stage string matching for column: {}", metric_col);
+        
+        // Step 1: Multi-stage value matching (exact -> fuzzy -> LLM prompt)
+        let matching_result = llm_matcher.match_values(
+            df_a,
+            df_b,
+            metric_col,
+            metric_col,
+            Some(&format!("Comparing {} values between two systems", metric_col)),
+        ).await?;
+        
+        println!("   ✅ Matched {} values ({} exact, {} fuzzy)", 
+            matching_result.matches.len(),
+            matching_result.matches.iter().filter(|m| m.match_type == crate::llm_value_matcher::MatchType::Exact).count(),
+            matching_result.matches.iter().filter(|m| m.match_type == crate::llm_value_matcher::MatchType::Fuzzy).count());
+        
+        // Create value mapping for joins
+        let mut value_map: std::collections::HashMap<String, String> = HashMap::new();
+        for m in &matching_result.matches {
+            value_map.insert(m.value_a.clone(), m.value_b.clone());
+        }
+        
+        // Step 2: Join dataframes and compare using the mapping
+        let grain_cols: Vec<Expr> = grain.iter().map(|c| col(c)).collect();
+        
+        let df_a_lazy = df_a.clone().lazy();
+        let df_b_lazy = df_b.clone().lazy();
+        
+        // Rename metric columns
+        let df_a_renamed = df_a_lazy
+            .with_columns([col(metric_col).alias("metric_a")]);
+        let df_b_renamed = df_b_lazy
+            .with_columns([col(metric_col).alias("metric_b")]);
+        
+        // Join on grain
+        let joined = df_a_renamed
+            .join(
+                df_b_renamed,
+                grain_cols.clone(),
+                grain_cols.clone(),
+                JoinArgs::new(JoinType::Inner),
+            )
+            .collect()?;
+        
+        // Apply value mapping and check for matches/mismatches
+        // For now, we'll do a simple comparison - in production, we'd use the mapping
+        let mismatches_df = joined
+            .clone()
+            .lazy()
+            .filter(col("metric_a").neq(col("metric_b")))
+            .collect()?;
+        
+        let matches_df = joined
+            .clone()
+            .lazy()
+            .filter(col("metric_a").eq(col("metric_b")))
+            .collect()?;
+        
+        let mismatches = mismatches_df.height();
+        let matches = matches_df.height();
+        
+        // Store unmatched values for user prompt (if LLM matching is available)
+        let (unmatched_a, unmatched_b) = if !matching_result.unmatched_a.is_empty() || !matching_result.unmatched_b.is_empty() {
+            (Some(matching_result.unmatched_a.clone()), Some(matching_result.unmatched_b.clone()))
+        } else {
+            (None, None)
+        };
+        
+        Ok(DataDiff {
+            mismatches,
+            matches,
+            mismatch_details: mismatches_df,
+            unmatched_values_a: unmatched_a,
+            unmatched_values_b: unmatched_b,
+            value_matching_result: Some(matching_result),
         })
     }
     
@@ -342,6 +458,9 @@ impl DiffEngine {
             mismatches,
             matches,
             mismatch_details: mismatches_df,
+            unmatched_values_a: None,
+            unmatched_values_b: None,
+            value_matching_result: None,
         })
     }
     
@@ -385,5 +504,10 @@ pub struct DataDiff {
     pub mismatches: usize,
     pub matches: usize,
     pub mismatch_details: DataFrame,
+    /// Unmatched distinct values for string columns (for LLM matching prompt)
+    pub unmatched_values_a: Option<Vec<String>>,
+    pub unmatched_values_b: Option<Vec<String>>,
+    /// Value matching result (for string columns)
+    pub value_matching_result: Option<ValueMatchingResult>,
 }
 

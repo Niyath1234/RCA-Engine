@@ -1,67 +1,61 @@
 import React from 'react';
-import {
-  AppBar,
-  Toolbar,
-  IconButton,
-  Typography,
-  Box,
-  Chip,
-} from '@mui/material';
-import {
-  Menu as MenuIcon,
-  Settings as SettingsIcon,
-} from '@mui/icons-material';
-import { useStore } from '../store/useStore';
+import { Box, Tabs, Tab, IconButton } from '@mui/material';
+import { Settings as SettingsIcon } from '@mui/icons-material';
 
-export const TopBar: React.FC = () => {
-  const { sidebarOpen, setSidebarOpen, viewMode } = useStore();
+interface TopBarProps {
+  activeView: 'query' | 'chat' | 'graph';
+  onViewChange: (view: 'query' | 'chat' | 'graph') => void;
+}
 
+export const TopBar: React.FC<TopBarProps> = ({ activeView, onViewChange }) => {
   return (
-    <AppBar
-      position="static"
+    <Box
       sx={{
-        backgroundColor: '#161B22',
-        borderBottom: '1px solid #30363D',
-        boxShadow: 'none',
-        height: 48,
+        height: 40,
+        backgroundColor: '#252526',
+        borderBottom: '1px solid #3E3E42',
+        display: 'flex',
+        alignItems: 'center',
+        px: 2,
+        gap: 2,
       }}
     >
-      <Toolbar sx={{ minHeight: '48px !important', px: 2 }}>
-        {!sidebarOpen && (
-          <IconButton
-            edge="start"
-            onClick={() => setSidebarOpen(true)}
-            sx={{ color: '#E6EDF3', mr: 2 }}
-          >
-            <MenuIcon />
-          </IconButton>
-        )}
-        <Typography
-          variant="h6"
+      <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Tabs
+          value={activeView}
+          onChange={(_, value) => onViewChange(value)}
           sx={{
-            flexGrow: 1,
-            color: '#FF6B35',
-            fontWeight: 700,
-            fontSize: '1.1rem',
+            minHeight: 40,
+            '& .MuiTab-root': {
+              minHeight: 40,
+              padding: '0 16px',
+              textTransform: 'none',
+              color: '#CCCCCC',
+              fontSize: '0.875rem',
+              '&.Mui-selected': {
+                color: '#FFFFFF',
+                backgroundColor: '#1E1E1E',
+              },
+            },
+            '& .MuiTabs-indicator': {
+              display: 'none',
+            },
           }}
         >
-          RCA ENGINE
-        </Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Chip
-            label={viewMode.toUpperCase()}
-            size="small"
-            sx={{
-              backgroundColor: 'rgba(255, 107, 53, 0.1)',
-              color: '#FF6B35',
-            }}
-          />
-          <IconButton sx={{ color: '#8B949E' }}>
-            <SettingsIcon />
-          </IconButton>
-        </Box>
-      </Toolbar>
-    </AppBar>
+          <Tab label="Query" value="query" />
+          <Tab label="Chat" value="chat" />
+          <Tab label="Graph" value="graph" />
+        </Tabs>
+      </Box>
+      <IconButton
+        size="small"
+        sx={{
+          color: '#CCCCCC',
+          '&:hover': { backgroundColor: '#3E3E42' },
+        }}
+      >
+        <SettingsIcon fontSize="small" />
+      </IconButton>
+    </Box>
   );
 };
-

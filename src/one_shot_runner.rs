@@ -92,6 +92,8 @@ impl OneShotRunner {
                         time_scope: None,
                         systems: vec![],
                         validation_constraint: None,
+                        joins: vec![],
+                        tables: vec![],
                     },
                     grounded_task: None,
                     execution_plan: None,
@@ -287,7 +289,25 @@ impl OneShotRunner {
 
     async fn compile_intent(&self, query: &str) -> Result<IntentSpec> {
         let compiler = IntentCompiler::new(self.llm.clone());
-        compiler.compile(query).await
+        let mut intent = compiler.compile(query).await?;
+        
+        // SAFEGUARD: Validate against metadata to prevent hallucination
+        let validation_result = IntentCompiler::validate_against_metadata(&mut intent, &self.metadata)?;
+        
+        if !validation_result.is_valid {
+            return Err(RcaError::Execution(format!(
+                "Intent validation failed (hallucination detected):\nErrors: {}\nWarnings: {}",
+                validation_result.errors.join("; "),
+                validation_result.warnings.join("; ")
+            )));
+        }
+        
+        // Log warnings if any
+        if !validation_result.warnings.is_empty() {
+            warn!("Intent validation warnings: {:?}", validation_result.warnings);
+        }
+        
+        Ok(intent)
     }
 
     async fn ground_task(&self, intent: &IntentSpec) -> Result<GroundedTask> {

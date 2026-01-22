@@ -105,6 +105,12 @@ impl ExecutionPlanner {
         info!("Building execution plan for {:?} task", grounded_task.task_type);
         
         match grounded_task.task_type {
+            crate::intent_compiler::TaskType::QUERY => {
+                // Direct query - handled by QueryEngine, not ExecutionPlanner
+                Err(crate::error::RcaError::Execution(
+                    "QUERY tasks should be handled by QueryEngine, not ExecutionPlanner".to_string()
+                ))
+            }
             crate::intent_compiler::TaskType::RCA => {
                 self.build_rca_plan(grounded_task)
             }

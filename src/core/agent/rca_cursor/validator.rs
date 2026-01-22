@@ -280,14 +280,14 @@ impl TaskValidator {
             }
 
             let time_col_exists_a = tables_a.iter().any(|t| {
-                t.time_column == time_range.time_column ||
+                t.time_column.as_ref().map_or(false, |tc| tc == &time_range.time_column) ||
                 t.columns.as_ref().map_or(false, |cols| {
                     cols.iter().any(|c| c.name == time_range.time_column)
                 })
             });
             
             let time_col_exists_b = tables_b.iter().any(|t| {
-                t.time_column == time_range.time_column ||
+                t.time_column.as_ref().map_or(false, |tc| tc == &time_range.time_column) ||
                 t.columns.as_ref().map_or(false, |cols| {
                     cols.iter().any(|c| c.name == time_range.time_column)
                 })
@@ -296,10 +296,10 @@ impl TaskValidator {
             if !time_col_exists_a && !time_col_exists_b {
                 // Provide helpful hint: list time columns
                 let time_cols_a: Vec<String> = tables_a.iter()
-                    .map(|t| t.time_column.clone())
+                    .filter_map(|t| t.time_column.clone())
                     .collect();
                 let time_cols_b: Vec<String> = tables_b.iter()
-                    .map(|t| t.time_column.clone())
+                    .filter_map(|t| t.time_column.clone())
                     .collect();
                 
                 let hint = if !time_cols_a.is_empty() || !time_cols_b.is_empty() {

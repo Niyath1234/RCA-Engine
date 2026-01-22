@@ -50,21 +50,66 @@ impl Hypergraph {
     }
     
     /// Get subgraph of tables needed for reconciliation
+    /// Supports both same-metric and cross-metric reconciliation
     pub fn get_reconciliation_subgraph(
         &self,
         system_a: &str,
         system_b: &str,
         metric: &str,
     ) -> Result<ReconciliationSubgraph> {
-        // Find rules for both systems
+        // Try to find rules - support cross-metric reconciliation
+        // If metric not found in system_a, try to find any metric in that system
         let rules_a = self.metadata.get_rules_for_system_metric(system_a, metric);
         let rules_b = self.metadata.get_rules_for_system_metric(system_b, metric);
         
+        // If no rules found, try auto-inference (for simple column access)
+        let rules_a = if rules_a.is_empty() {
+            // Try auto-inference - check if metric exists as a column in system_a tables
+            let system_tables: Vec<&crate::metadata::Table> = self.metadata.tables
+                .iter()
+                .filter(|t| t.system.to_lowercase() == system_a.to_lowercase())
+                .collect();
+            
+            for table in system_tables {
+                if let Some(ref cols) = table.columns {
+                    if cols.iter().any(|c| c.name.to_lowercase() == metric.to_lowercase()) {
+                        // Auto-infer rule will be created by get_rules_for_system_metric
+                        // Try again after potential auto-inference
+                        return self.get_reconciliation_subgraph(system_a, system_b, metric);
+                    }
+                }
+            }
+            rules_a
+        } else {
+            rules_a
+        };
+        
+        let rules_b = if rules_b.is_empty() {
+            // Try auto-inference for system_b
+            let system_tables: Vec<&crate::metadata::Table> = self.metadata.tables
+                .iter()
+                .filter(|t| t.system.to_lowercase() == system_b.to_lowercase())
+                .collect();
+            
+            for table in system_tables {
+                if let Some(ref cols) = table.columns {
+                    if cols.iter().any(|c| c.name.to_lowercase() == metric.to_lowercase()) {
+                        // Auto-infer rule will be created by get_rules_for_system_metric
+                        // Try again after potential auto-inference
+                        return self.get_reconciliation_subgraph(system_a, system_b, metric);
+                    }
+                }
+            }
+            rules_b
+        } else {
+            rules_b
+        };
+        
         if rules_a.is_empty() {
-            return Err(RcaError::Graph(format!("No rules found for {} {}", system_a, metric)));
+            return Err(RcaError::Graph(format!("No rules found for {} {}. Try: 1) Define explicit rule, 2) Ensure metric column exists in tables, 3) Check auto-inference is working", system_a, metric)));
         }
         if rules_b.is_empty() {
-            return Err(RcaError::Graph(format!("No rules found for {} {}", system_b, metric)));
+            return Err(RcaError::Graph(format!("No rules found for {} {}. Try: 1) Define explicit rule, 2) Ensure metric column exists in tables, 3) Check auto-inference is working", system_b, metric)));
         }
         
         // Get all tables for each side
@@ -85,6 +130,92 @@ impl Hypergraph {
             system_a: system_a.to_string(),
             system_b: system_b.to_string(),
             metric: metric.to_string(),
+            rules_a: rules_a.iter().map(|r| r.id.clone()).collect(),
+            rules_b: rules_b.iter().map(|r| r.id.clone()).collect(),
+            tables_a: tables_a.into_iter().collect(),
+            tables_b: tables_b.into_iter().collect(),
+        })
+    }
+    
+    /// Get subgraph for cross-metric reconciliation (different metrics in different systems)
+    pub fn get_reconciliation_subgraph_cross_metric(
+        &self,
+        system_a: &str,
+        system_b: &str,
+        metric_a: &str,
+        metric_b: &str,
+    ) -> Result<ReconciliationSubgraph> {
+        // Find rules for metric_a in system_a and metric_b in system_b
+        let rules_a = self.metadata.get_rules_for_system_metric(system_a, metric_a);
+        let rules_b = self.metadata.get_rules_for_system_metric(system_b, metric_b);
+        
+        // Try auto-inference if rules not found
+        let rules_a = if rules_a.is_empty() {
+            let system_tables: Vec<&crate::metadata::Table> = self.metadata.tables
+                .iter()
+                .filter(|t| t.system.to_lowercase() == system_a.to_lowercase())
+                .collect();
+            
+            for table in system_tables {
+                if let Some(ref cols) = table.columns {
+                    if cols.iter().any(|c| c.name.to_lowercase() == metric_a.to_lowercase()) {
+                        // Auto-infer rule will be created by get_rules_for_system_metric
+                        return self.get_reconciliation_subgraph_cross_metric(system_a, system_b, metric_a, metric_b);
+                    }
+                }
+            }
+            rules_a
+        } else {
+            rules_a
+        };
+        
+        let rules_b = if rules_b.is_empty() {
+            let system_tables: Vec<&crate::metadata::Table> = self.metadata.tables
+                .iter()
+                .filter(|t| t.system.to_lowercase() == system_b.to_lowercase())
+                .collect();
+            
+            for table in system_tables {
+                if let Some(ref cols) = table.columns {
+                    if cols.iter().any(|c| c.name.to_lowercase() == metric_b.to_lowercase()) {
+                        // Auto-infer rule will be created by get_rules_for_system_metric
+                        return self.get_reconciliation_subgraph_cross_metric(system_a, system_b, metric_a, metric_b);
+                    }
+                }
+            }
+            rules_b
+        } else {
+            rules_b
+        };
+        
+        if rules_a.is_empty() {
+            return Err(RcaError::Graph(format!("No rules found for {} {}. Try: 1) Define explicit rule, 2) Ensure metric column exists in tables, 3) Check auto-inference is working", system_a, metric_a)));
+        }
+        if rules_b.is_empty() {
+            return Err(RcaError::Graph(format!("No rules found for {} {}. Try: 1) Define explicit rule, 2) Ensure metric column exists in tables, 3) Check auto-inference is working", system_b, metric_b)));
+        }
+        
+        // Get all tables for each side
+        let mut tables_a = HashSet::new();
+        let mut tables_b = HashSet::new();
+        
+        for rule in &rules_a {
+            let tables = self.get_rule_tables(&rule.id)?;
+            tables_a.extend(tables);
+        }
+        
+        for rule in &rules_b {
+            let tables = self.get_rule_tables(&rule.id)?;
+            tables_b.extend(tables);
+        }
+        
+        // For cross-metric, use a combined metric name for the subgraph
+        let combined_metric = format!("{}_vs_{}", metric_a, metric_b);
+        
+        Ok(ReconciliationSubgraph {
+            system_a: system_a.to_string(),
+            system_b: system_b.to_string(),
+            metric: combined_metric,
             rules_a: rules_a.iter().map(|r| r.id.clone()).collect(),
             rules_b: rules_b.iter().map(|r| r.id.clone()).collect(),
             tables_a: tables_a.into_iter().collect(),

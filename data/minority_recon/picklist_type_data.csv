@@ -1,0 +1,15 @@
+type_code,data_code,data_description,is_active
+49,REL001,Hindu,true
+49,REL002,Muslim,true
+49,REL003,Christian,true
+91,REL001,Hinduism,true
+91,REL002,Islam,true
+91,REL003,Christianity,true
+190,MIN001,SC,true
+190,MIN002,ST,true
+190,MIN003,OBC,true
+190,MIN004,General,true
+4,ST001,Maharashtra,true
+4,ST002,Karnataka,true
+4,ST003,Tamil Nadu,true
+

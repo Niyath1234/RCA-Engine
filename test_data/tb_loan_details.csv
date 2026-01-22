@@ -1,8 +1,0 @@
-loan_id,customer_id,principal_amount,interest_amount,payment_amount,loan_status
-L001,CUST001,10000.00,2000.00,2000.00,active
-L002,CUST001,14000.00,3000.00,2000.00,active
-L003,CUST002,7500.00,1500.00,1000.00,active
-L004,CUST004,10000.00,3000.00,1000.00,active
-L005,CUST005,15000.00,5000.00,2000.00,active
-L006,CUST005,15000.00,5000.00,2000.00,active
-

@@ -7,10 +7,20 @@ use tracing::{info, warn};
 pub struct QueryInterpretation {
     pub system_a: String,
     pub system_b: String,
-    pub metric: String,
+    // For same-metric comparison (backward compatibility)
+    #[serde(default)]
+    pub metric: Option<String>,
+    // For cross-metric comparison (new)
+    #[serde(default)]
+    pub metric_a: Option<String>,
+    #[serde(default)]
+    pub metric_b: Option<String>,
     pub as_of_date: Option<String>,
     #[serde(default = "default_confidence")]
     pub confidence: f64,
+    // Indicates if this is a cross-metric comparison
+    #[serde(default)]
+    pub is_cross_metric: bool,
 }
 
 fn default_confidence() -> f64 {
@@ -174,21 +184,65 @@ Format: {{"system_a":"id","system_b":"id","metric":"id","as_of_date":"YYYY-MM-DD
             info!("Fixed system_b to: {}", interpretation.system_b);
         }
         
-        // Validate metric as well
+        // Validate metrics - handle both same-metric and cross-metric cases
         let valid_metric_ids: std::collections::HashSet<String> = business_labels.metrics.iter()
             .map(|m| m.metric_id.clone())
             .collect();
         
-        if !valid_metric_ids.contains(&interpretation.metric) {
-            warn!("LLM returned invalid metric '{}', available: {:?}", interpretation.metric, valid_metric_ids);
-            // Try to match by alias
-            let matched = business_labels.metrics.iter().find(|m| {
-                m.aliases.iter().any(|a| a.to_lowercase() == interpretation.metric.to_lowercase()) ||
-                m.metric_id.to_lowercase().contains(&interpretation.metric.to_lowercase()) ||
-                interpretation.metric.to_lowercase().contains(&m.metric_id.to_lowercase())
-            });
-            interpretation.metric = matched.map(|m| m.metric_id.clone()).unwrap_or_else(|| "tos".to_string());
-            info!("Fixed metric to: {}", interpretation.metric);
+        // Handle cross-metric case
+        if interpretation.is_cross_metric {
+            if let Some(ref metric_a) = interpretation.metric_a {
+                if !valid_metric_ids.contains(metric_a) {
+                    let matched = business_labels.metrics.iter().find(|m| {
+                        m.aliases.iter().any(|a| a.to_lowercase() == metric_a.to_lowercase()) ||
+                        m.metric_id.to_lowercase().contains(&metric_a.to_lowercase()) ||
+                        metric_a.to_lowercase().contains(&m.metric_id.to_lowercase())
+                    });
+                    if let Some(m) = matched {
+                        interpretation.metric_a = Some(m.metric_id.clone());
+                        info!("Fixed metric_a to: {}", m.metric_id);
+                    }
+                }
+            }
+            
+            if let Some(ref metric_b) = interpretation.metric_b {
+                if !valid_metric_ids.contains(metric_b) {
+                    let matched = business_labels.metrics.iter().find(|m| {
+                        m.aliases.iter().any(|a| a.to_lowercase() == metric_b.to_lowercase()) ||
+                        m.metric_id.to_lowercase().contains(&metric_b.to_lowercase()) ||
+                        metric_b.to_lowercase().contains(&m.metric_id.to_lowercase())
+                    });
+                    if let Some(m) = matched {
+                        interpretation.metric_b = Some(m.metric_id.clone());
+                        info!("Fixed metric_b to: {}", m.metric_id);
+                    }
+                }
+            }
+        } else {
+            // Handle same-metric case (backward compatibility)
+            if let Some(ref metric) = interpretation.metric {
+                if !valid_metric_ids.contains(metric) {
+                    let matched = business_labels.metrics.iter().find(|m| {
+                        m.aliases.iter().any(|a| a.to_lowercase() == metric.to_lowercase()) ||
+                        m.metric_id.to_lowercase().contains(&metric.to_lowercase()) ||
+                        metric.to_lowercase().contains(&m.metric_id.to_lowercase())
+                    });
+                    interpretation.metric = matched.map(|m| m.metric_id.clone());
+                    if let Some(ref m) = interpretation.metric {
+                        info!("Fixed metric to: {}", m);
+                    }
+                }
+            } else {
+                // If no metric specified, try to infer from metric_a/metric_b
+                if let (Some(ref ma), Some(ref mb)) = (&interpretation.metric_a, &interpretation.metric_b) {
+                    if ma == mb {
+                        interpretation.metric = Some(ma.clone());
+                        interpretation.is_cross_metric = false;
+                    } else {
+                        interpretation.is_cross_metric = true;
+                    }
+                }
+            }
         }
         
         Ok(interpretation)

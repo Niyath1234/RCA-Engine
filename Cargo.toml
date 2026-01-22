@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # Data processing
-polars = { version = "0.40", features = ["lazy", "temporal", "strings", "csv", "parquet", "json"] }
+polars = { version = "0.40", features = ["lazy", "temporal", "strings", "csv", "parquet", "json", "sql"] }
 arrow = { version = "57", features = [] }
 
 # LLM client
@@ -44,6 +44,9 @@ csv = "1.3"
 # Lazy static for global variables
 lazy_static = "1.4"
 
+# Database and caching for learning store
+rusqlite = { version = "0.31", features = ["bundled"] }
+
 # HTTP server for UI - using tokio directly (no external HTTP framework needed)
 
 # Hypergraph module dependencies  
@@ -55,4 +58,16 @@ dashmap = "7.0.0-rc2"
 [[bin]]
 name = "server"
 path = "src/bin/server.rs"
+
+[[bin]]
+name = "load_tables_data"
+path = "load_tables_data.rs"
+
+[[bin]]
+name = "load_scf_data"
+path = "load_scf_data.rs"
+
+[[bin]]
+name = "create_test_tables"
+path = "create_test_tables.rs"
 

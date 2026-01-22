@@ -21,7 +21,8 @@ import {
   CheckCircle as CheckIcon,
 } from '@mui/icons-material';
 import { useStore } from '../store/useStore';
-import { reasoningAPI, ClarificationRequest } from '../api/client';
+import { agentAPI, reasoningAPI } from '../api/client';
+import type { AgentResponse, ClarificationRequest } from '../api/client';
 
 // Helper function to parse CSV or tabular data
 const parseTableData = (content: string): { headers: string[], rows: string[][] } | null => {
@@ -179,7 +180,12 @@ export const ReasoningChat: React.FC = () => {
     originalQuery: string;
     clarification: ClarificationRequest;
   } | null>(null);
+  const [pendingAgentClarification, setPendingAgentClarification] = useState<{
+    sessionId: string;
+    clarification: NonNullable<AgentResponse['clarification']>;
+  } | null>(null);
   const [useFastFail] = useState(true); // Toggle for fail-fast mode (can be made configurable)
+  const [agentSessionId] = useState(() => `ui-${Date.now()}`);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -348,6 +354,57 @@ export const ReasoningChat: React.FC = () => {
     }
   };
 
+  const handleAgentChoice = async (choiceId: string) => {
+    if (!pendingAgentClarification || isLoading) return;
+    setIsLoading(true);
+    try {
+      addReasoningStep({
+        id: `agent-choice-${Date.now()}`,
+        type: 'action',
+        content: `[CHOICE] ${choiceId}`,
+        timestamp: new Date().toISOString(),
+      });
+      const resp = await agentAPI.continue(pendingAgentClarification.sessionId, choiceId, {});
+      const data = resp.data as AgentResponse;
+      setPendingAgentClarification(null);
+
+      if (data?.trace?.length) {
+        data.trace.forEach((ev: any, idx: number) => {
+          const stepType =
+            ev.event_type === 'error' ? 'error' :
+            ev.event_type === 'tool_call' ? 'action' :
+            ev.event_type === 'tool_result' ? 'result' :
+            'thought';
+
+          addReasoningStep({
+            id: `agent-continue-${Date.now()}-${idx}`,
+            type: stepType,
+            content: `[${ev.event_type.toUpperCase()}]\n${JSON.stringify(ev.payload ?? {}, null, 2)}`,
+            timestamp: new Date().toISOString(),
+          });
+        });
+      }
+
+      if (data.final_answer) {
+        addReasoningStep({
+          id: `agent-final-continue-${Date.now()}`,
+          type: 'result',
+          content: data.final_answer,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (e: any) {
+      addReasoningStep({
+        id: `agent-choice-error-${Date.now()}`,
+        type: 'error',
+        content: e?.message || 'Failed to continue agent',
+        timestamp: new Date().toISOString(),
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Cancel clarification and start fresh
   const cancelClarification = () => {
     setPendingClarification(null);
@@ -367,6 +424,10 @@ export const ReasoningChat: React.FC = () => {
       await handleClarificationAnswer();
       return;
     }
+    if (pendingAgentClarification) {
+      // Agent clarifications are handled via choice buttons
+      return;
+    }
 
     const userQuery = input.trim();
     setInput('');
@@ -381,6 +442,82 @@ export const ReasoningChat: React.FC = () => {
     });
 
     try {
+      // --------------------------------------------------------------------
+      // Agentic (Cursor-like) path: returns plan + tool trace + clarification
+      // --------------------------------------------------------------------
+      try {
+        const agentResp = await agentAPI.run(agentSessionId, userQuery, {});
+        const agentData = agentResp.data as AgentResponse;
+
+        // Render agent trace as compact steps
+        if (agentData?.trace?.length) {
+          agentData.trace.forEach((ev: any, idx: number) => {
+            const stepType =
+              ev.event_type === 'error' ? 'error' :
+              ev.event_type === 'tool_call' ? 'action' :
+              ev.event_type === 'tool_result' ? 'result' :
+              'thought';
+
+            const content = (() => {
+              if (ev.event_type === 'plan') return `[PLAN]\n${JSON.stringify(ev.payload?.plan ?? ev.payload, null, 2)}`;
+              if (ev.event_type === 'tool_call') return `[TOOL_CALL] ${ev.payload?.tool_name}\n${JSON.stringify(ev.payload?.args ?? {}, null, 2)}`;
+              if (ev.event_type === 'tool_result') return `[TOOL_RESULT] ${ev.payload?.tool_name}\n${JSON.stringify(ev.payload?.result ?? {}, null, 2)}`;
+              if (ev.event_type === 'retry') return `[RETRY] ${ev.payload?.tool_name} attempt=${ev.payload?.attempt}\n${JSON.stringify(ev.payload?.args ?? {}, null, 2)}`;
+              if (ev.event_type === 'error') return `[ERROR] ${ev.payload?.tool_name ?? ''} ${ev.payload?.error ?? agentData.error ?? ''}`;
+              return ev.payload?.summary ? ev.payload.summary : JSON.stringify(ev.payload ?? {}, null, 2);
+            })();
+
+            addReasoningStep({
+              id: `agent-${Date.now()}-${idx}`,
+              type: stepType,
+              content,
+              timestamp: new Date().toISOString(),
+              metadata: { agent: true, event_type: ev.event_type },
+            });
+          });
+        }
+
+        if (agentData.status === 'needs_clarification' && agentData.clarification) {
+          setPendingAgentClarification({
+            sessionId: agentSessionId,
+            clarification: agentData.clarification,
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        if (agentData.status === 'error') {
+          addReasoningStep({
+            id: `agent-error-${Date.now()}`,
+            type: 'error',
+            content: agentData.error || 'Agent error',
+            timestamp: new Date().toISOString(),
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        if (agentData.final_answer) {
+          addReasoningStep({
+            id: `agent-final-${Date.now()}`,
+            type: 'result',
+            content: agentData.final_answer,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        setIsLoading(false);
+        return;
+      } catch (agentErr: any) {
+        // If agent is unavailable, fall back to existing reasoning flow.
+        addReasoningStep({
+          id: `agent-fallback-${Date.now()}`,
+          type: 'thought',
+          content: '[WARN] Agent unavailable. Falling back to direct execution...',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       // If fail-fast mode is enabled, first assess the query
       if (useFastFail) {
         addReasoningStep({
@@ -402,38 +539,42 @@ export const ReasoningChat: React.FC = () => {
             });
             
             // Show confidence
-            addReasoningStep({
-              id: `confidence-${Date.now()}`,
-              type: 'thought',
-              content: `[CONFIDENCE] Confidence: ${Math.round(clarification.confidence * 100)}% (below threshold)`,
-              timestamp: new Date().toISOString(),
-            });
+            if (clarification.confidence !== undefined) {
+              addReasoningStep({
+                id: `confidence-${Date.now()}`,
+                type: 'thought',
+                content: `[CONFIDENCE] Confidence: ${Math.round(clarification.confidence * 100)}% (below threshold)`,
+                timestamp: new Date().toISOString(),
+              });
+            }
             
             // Show what we understood
             const partial = clarification.partial_understanding;
-            const understood: string[] = [];
-            if (partial.task_type) understood.push(`Task: ${partial.task_type}`);
-            if (partial.metrics.length) understood.push(`Metrics: ${partial.metrics.join(', ')}`);
-            if (partial.systems.length) understood.push(`Systems: ${partial.systems.join(', ')}`);
-            
-            if (understood.length > 0) {
-              addReasoningStep({
-                id: `partial-${Date.now()}`,
-                type: 'thought',
-                content: `[OK] Understood: ${understood.join(' | ')}`,
-                timestamp: new Date().toISOString(),
-              });
+            if (partial) {
+              const understood: string[] = [];
+              if (partial.task_type) understood.push(`Task: ${partial.task_type}`);
+              if (partial.metrics?.length) understood.push(`Metrics: ${partial.metrics.join(', ')}`);
+              if (partial.systems?.length) understood.push(`Systems: ${partial.systems.join(', ')}`);
+              
+              if (understood.length > 0) {
+                addReasoningStep({
+                  id: `partial-${Date.now()}`,
+                  type: 'thought',
+                  content: `[OK] Understood: ${understood.join(' | ')}`,
+                  timestamp: new Date().toISOString(),
+                });
+              }
             }
             
             // Show the clarification question
             addReasoningStep({
               id: `question-${Date.now()}`,
               type: 'result',
-              content: `[CLARIFY] **Clarification Needed**\n\n${clarification.question}\n\n${
-                clarification.missing_pieces.length > 0 
-                  ? `**Missing information:**\n${clarification.missing_pieces.map(p => 
+              content: `[CLARIFY] **Clarification Needed**\n\n${clarification.question || 'Please provide additional information'}\n\n${
+                clarification.missing_pieces && clarification.missing_pieces.length > 0 
+                  ? `**Missing information:**\n${clarification.missing_pieces.map((p: any) => 
                       `• ${p.field} (${p.importance}): ${p.description}${
-                        p.suggestions.length > 0 ? ` — e.g., ${p.suggestions.join(', ')}` : ''
+                        p.suggestions?.length > 0 ? ` — e.g., ${p.suggestions.join(', ')}` : ''
                       }`
                     ).join('\n')}`
                   : ''
@@ -844,7 +985,7 @@ cargo run --bin rca-engine run "${userQuery}" --metadata-dir ./metadata --data-d
             </Typography>
           </Box>
         ) : (
-          reasoningSteps.map((step) => {
+          reasoningSteps.map((step: any) => {
             // ChatGPT-like compact style
             const isThought = step.type === 'thought';
             const isAction = step.type === 'action';
@@ -1293,6 +1434,31 @@ cargo run --bin rca-engine run "${userQuery}" --metadata-dir ./metadata --data-d
           backgroundColor: '#161B22',
         }}
       >
+        {pendingAgentClarification && (
+          <Box sx={{ mb: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <HelpIcon sx={{ color: '#2EA043', fontSize: 18 }} />
+              <Typography variant="caption" sx={{ color: '#8B949E', fontWeight: 500 }}>
+                {pendingAgentClarification.clarification.question}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {pendingAgentClarification.clarification.choices && pendingAgentClarification.clarification.choices.slice(0, 8).map((c: any) => (
+                <Chip
+                  key={c.id}
+                  label={`${c.label} (${Math.round(c.score * 100)}%)`}
+                  onClick={() => handleAgentChoice(c.id)}
+                  sx={{
+                    backgroundColor: 'rgba(46, 160, 67, 0.15)',
+                    color: '#C9D1D9',
+                    border: '1px solid rgba(46, 160, 67, 0.25)',
+                  }}
+                />
+              ))}
+            </Box>
+          </Box>
+        )}
+
         <Box sx={{ display: 'flex', gap: 1 }}>
           <TextField
             fullWidth
@@ -1343,12 +1509,12 @@ cargo run --bin rca-engine run "${userQuery}" --metadata-dir ./metadata --data-d
         </Box>
         
         {/* Response hints */}
-        {pendingClarification && pendingClarification.clarification.response_hints.length > 0 && (
+        {pendingClarification && pendingClarification.clarification.response_hints && pendingClarification.clarification.response_hints.length > 0 && (
           <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
             <Typography variant="caption" sx={{ color: '#6E7681', mr: 1 }}>
               Suggestions:
             </Typography>
-            {pendingClarification.clarification.response_hints.slice(0, 4).map((hint, idx) => (
+            {pendingClarification.clarification.response_hints.slice(0, 4).map((hint: string, idx: number) => (
               <Chip
                 key={idx}
                 label={hint}

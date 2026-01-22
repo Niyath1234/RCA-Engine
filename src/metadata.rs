@@ -18,7 +18,8 @@ pub struct Table {
     pub name: String,
     pub entity: String,
     pub primary_key: Vec<String>,
-    pub time_column: String,
+    #[serde(default)]
+    pub time_column: Option<String>,
     pub system: String,
     pub path: String,
     #[serde(default)]
@@ -704,15 +705,16 @@ impl Metadata {
         let mut as_of_rules = Vec::new();
         
         for table in tables {
-            if !table.time_column.is_empty() {
-                // Check if time_column matches common patterns
-                let time_col = &table.time_column;
-                if time_col.contains("date") || time_col.contains("time") || time_col.contains("timestamp") {
-                    as_of_rules.push(AsOfRule {
-                        table: table.name.clone(),
-                        as_of_column: time_col.clone(),
-                        default: "2025-12-31".to_string(), // Default date
-                    });
+            if let Some(ref time_col) = table.time_column {
+                if !time_col.is_empty() {
+                    // Check if time_column matches common patterns
+                    if time_col.contains("date") || time_col.contains("time") || time_col.contains("timestamp") {
+                        as_of_rules.push(AsOfRule {
+                            table: table.name.clone(),
+                            as_of_column: time_col.clone(),
+                            default: "2025-12-31".to_string(), // Default date
+                        });
+                    }
                 }
             }
         }
@@ -820,7 +822,7 @@ impl Metadata {
     }
     
     pub fn get_rules_for_system_metric(&self, system: &str, metric: &str) -> Vec<Rule> {
-        // Try exact match first
+        // Step 1: Try exact match first (explicit rules take precedence)
         let exact_match = self.rules_by_system_metric
             .get(&(system.to_string(), metric.to_string()))
             .cloned()
@@ -830,18 +832,100 @@ impl Metadata {
             return exact_match;
         }
         
-        // Try case-insensitive match
+        // Step 2: Try case-insensitive match for explicit rules
         let system_lower = system.to_lowercase();
         let metric_lower = metric.to_lowercase();
         
-        self.rules
+        let case_insensitive_match: Vec<Rule> = self.rules
             .iter()
             .filter(|r| {
                 r.system.to_lowercase() == system_lower && 
                 r.metric.to_lowercase() == metric_lower
             })
             .cloned()
-            .collect()
+            .collect();
+        
+        if !case_insensitive_match.is_empty() {
+            return case_insensitive_match;
+        }
+        
+        // Step 3: Auto-infer rule from metadata (only for simple cases - direct column access)
+        // Rules should only be needed for complex business logic (joins, transformations, etc.)
+        self.auto_infer_rule(system, metric)
+    }
+    
+    /// Auto-infer a simple rule from metadata when no explicit rule exists.
+    /// This handles the common case where a metric is just a direct column in a table.
+    /// Complex cases (joins, transformations) should still use explicit rules.
+    fn auto_infer_rule(&self, system: &str, metric: &str) -> Vec<Rule> {
+        use std::collections::HashMap;
+        
+        // Find tables in this system that have a column matching the metric name
+        let system_tables: Vec<&Table> = self.tables
+            .iter()
+            .filter(|t| t.system.to_lowercase() == system.to_lowercase())
+            .collect();
+        
+        for table in system_tables {
+            // Check if table has a column matching the metric name
+            let has_metric_column = table.columns.as_ref().map_or(false, |cols| {
+                cols.iter().any(|c| {
+                    c.name.to_lowercase() == metric.to_lowercase() ||
+                    c.name.to_lowercase().replace("_", "") == metric.to_lowercase().replace("_", "")
+                })
+            });
+            
+            if has_metric_column {
+                // Found a table with matching column - create auto-inferred rule
+                let metric_col = table.columns.as_ref().and_then(|cols| {
+                    cols.iter().find(|c| {
+                        c.name.to_lowercase() == metric.to_lowercase() ||
+                        c.name.to_lowercase().replace("_", "") == metric.to_lowercase().replace("_", "")
+                    })
+                });
+                
+                if let Some(col) = metric_col {
+                    let rule_id = format!("{}_system_{}_metric_{}_auto", system, metric, table.name);
+                    
+                    let mut attributes_needed = HashMap::new();
+                    attributes_needed.insert(table.entity.clone(), vec![col.name.clone()]);
+                    
+                    // Use table's primary key as target grain (grain is typically same as primary key)
+                    let target_grain = table.primary_key.clone();
+                    
+                    // Add grain columns to attributes needed
+                    for grain_col in &target_grain {
+                        if !attributes_needed.get(&table.entity).unwrap().contains(grain_col) {
+                            attributes_needed.get_mut(&table.entity).unwrap().push(grain_col.clone());
+                        }
+                    }
+                    
+                    let auto_rule = Rule {
+                        id: rule_id,
+                        system: system.to_string(),
+                        metric: metric.to_string(),
+                        target_entity: table.entity.clone(),
+                        target_grain: target_grain.clone(),
+                        computation: ComputationDefinition {
+                            description: format!("Auto-inferred: {} column from {} table", metric, table.name),
+                            source_entities: vec![table.entity.clone()],
+                            attributes_needed,
+                            formula: col.name.clone(),
+                            aggregation_grain: target_grain,
+                            filter_conditions: None,
+                            source_table: Some(table.name.clone()),
+                            note: Some("Auto-inferred rule - no explicit rule needed for simple column access".to_string()),
+                        },
+                        labels: Some(vec!["auto_inferred".to_string(), system.to_string()]),
+                    };
+                    
+                    return vec![auto_rule];
+                }
+            }
+        }
+        
+        // No matching column found - return empty (user needs to define explicit rule)
+        Vec::new()
     }
     
     pub fn get_metric(&self, id: &str) -> Option<&Metric> {

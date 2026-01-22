@@ -1,6 +1,7 @@
 use crate::error::{RcaError, Result};
 use crate::llm::{AmbiguityOption, AmbiguityQuestion};
 use crate::metadata::Metadata;
+use crate::metric_similarity::are_metrics_similar_via_contracts;
 use std::io::{self, Write};
 
 pub struct AmbiguityResolver {
@@ -14,21 +15,64 @@ impl AmbiguityResolver {
     
     /// Resolve ambiguities in query interpretation
     /// Returns resolved values or asks user questions (max 3)
+    /// 
+    /// If world_state is provided, checks contract column descriptions to determine
+    /// if metrics are similar (same description = same meaning)
     pub fn resolve(
         &self,
         interpretation: &crate::llm::QueryInterpretation,
+        world_state: Option<&crate::world_state::WorldState>,
     ) -> Result<ResolvedInterpretation> {
         // Check for ambiguities
         let mut questions = Vec::new();
         
         // Check if multiple rules exist for system/metric combination
+        // Handle both same-metric and cross-metric cases
+        let (metric_a, metric_b) = if interpretation.is_cross_metric {
+            (
+                interpretation.metric_a.as_ref().map(|s| s.as_str()).unwrap_or(""),
+                interpretation.metric_b.as_ref().map(|s| s.as_str()).unwrap_or("")
+            )
+        } else {
+            let metric = interpretation.metric.as_ref().map(|s| s.as_str()).unwrap_or("");
+            (metric, metric)
+        };
+        
+        // Check if metrics are similar via contract column descriptions or table metadata
+        // If they have the same description in contracts or table metadata, treat them as same-metric
+        let mut is_cross_metric = interpretation.is_cross_metric;
+        if is_cross_metric && !metric_a.is_empty() && !metric_b.is_empty() {
+            match are_metrics_similar_via_contracts(
+                world_state,
+                &self.metadata,
+                &interpretation.system_a,
+                &interpretation.system_b,
+                metric_a,
+                metric_b,
+            ) {
+                    Ok(true) => {
+                        // Metrics are similar based on contract descriptions
+                        // Treat as same-metric instead of cross-metric
+                        is_cross_metric = false;
+                        println!("   ℹ️  Metrics '{}' and '{}' are similar based on contract column descriptions - treating as same-metric", metric_a, metric_b);
+                    }
+                    Ok(false) => {
+                        // Metrics are different - keep as cross-metric
+                    }
+                    Err(e) => {
+                        // Error checking similarity - log but continue with original interpretation
+                        eprintln!("   ⚠️  Warning: Could not check metric similarity via contracts: {}", e);
+                    }
+                }
+        }
+        
         let rules_a = self.metadata.get_rules_for_system_metric(
             &interpretation.system_a,
-            &interpretation.metric,
+            metric_a,
         );
         let rules_b = self.metadata.get_rules_for_system_metric(
             &interpretation.system_b,
-            &interpretation.metric,
+            metric_b,
         );
         
         if rules_a.len() > 1 {
@@ -76,10 +120,22 @@ impl AmbiguityResolver {
         let rule_a_question = format!("Which rule version for {}?", interpretation.system_a);
         let rule_b_question = format!("Which rule version for {}?", interpretation.system_b);
         
+        // If we determined metrics are similar, set metric to the first one for same-metric mode
+        let (final_metric, final_metric_a, final_metric_b) = if !is_cross_metric && !metric_a.is_empty() {
+            // Same-metric mode: use metric_a as the unified metric
+            (Some(metric_a.to_string()), None, None)
+        } else {
+            // Cross-metric mode: keep both metrics
+            (interpretation.metric.clone(), interpretation.metric_a.clone(), interpretation.metric_b.clone())
+        };
+        
         Ok(ResolvedInterpretation {
             system_a: interpretation.system_a.clone(),
             system_b: interpretation.system_b.clone(),
-            metric: interpretation.metric.clone(),
+            metric: final_metric,
+            metric_a: final_metric_a,
+            metric_b: final_metric_b,
+            is_cross_metric,
             as_of_date: interpretation.as_of_date.clone(),
             rule_a: answers.get(&rule_a_question).cloned(),
             rule_b: answers.get(&rule_b_question).cloned(),
@@ -111,7 +167,12 @@ impl AmbiguityResolver {
 pub struct ResolvedInterpretation {
     pub system_a: String,
     pub system_b: String,
-    pub metric: String,
+    // For same-metric (backward compatibility)
+    pub metric: Option<String>,
+    // For cross-metric
+    pub metric_a: Option<String>,
+    pub metric_b: Option<String>,
+    pub is_cross_metric: bool,
     pub as_of_date: Option<String>,
     pub rule_a: Option<String>,
     pub rule_b: Option<String>,

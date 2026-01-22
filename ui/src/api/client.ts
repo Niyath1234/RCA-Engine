@@ -1,109 +1,79 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
-export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Pipeline API
-export const pipelineAPI = {
-  list: () => apiClient.get('/api/pipelines'),
-  create: (pipeline: any) => apiClient.post('/api/pipelines', pipeline),
-  update: (id: string, pipeline: any) => apiClient.put(`/api/pipelines/${id}`, pipeline),
-  delete: (id: string) => apiClient.delete(`/api/pipelines/${id}`),
-  run: (id: string) => apiClient.post(`/api/pipelines/${id}/run`),
-  status: (id: string) => apiClient.get(`/api/pipelines/${id}/status`),
-};
-
-// Reasoning API
-export const reasoningAPI = {
-  // Original query endpoint (direct execution)
-  query: (query: string, context?: any) =>
-    apiClient.post('/api/reasoning/query', { query, context }),
-  
-  // NEW: Assess query confidence (fail-fast check)
-  // Returns clarification request if confidence is low
-  assess: (query: string) =>
-    apiClient.post('/api/reasoning/assess', { query }),
-  
-  // NEW: Submit clarification answer
-  // Combines original query with user's answer
-  clarify: (query: string, answer: string) =>
-    apiClient.post('/api/reasoning/clarify', { query, answer }),
-  
-  // Streaming responses
-  stream: (query: string) => {
-    // For streaming responses
-    return fetch(`${API_BASE_URL}/api/reasoning/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
-    });
-  },
-};
-
-// Types for clarification flow
-export interface ClarificationRequest {
-  status: 'needs_clarification';
-  needs_clarification: true;
-  question: string;
-  missing_pieces: Array<{
-    field: string;
-    description: string;
-    importance: 'Required' | 'Helpful';
-    suggestions: string[];
+export interface AgentResponse {
+  status: string;
+  message?: string;
+  choices?: Array<{ id: string; label: string; description?: string }>;
+  error?: string;
+  data?: any;
+  trace?: Array<{
+    event_type: string;
+    payload?: any;
   }>;
-  confidence: number;
-  partial_understanding: {
-    task_type: string | null;
-    systems: string[];
-    metrics: string[];
-    entities: string[];
-    grain: string[];
-    keywords: string[];
+  clarification?: ClarificationRequest;
+  final_answer?: string;
+}
+
+export interface ClarificationRequest {
+  query: string;
+  answer?: string;
+  question?: string;
+  confidence?: number;
+  partial_understanding?: {
+    task_type?: string;
+    metrics?: string[];
+    systems?: string[];
   };
-  response_hints: string[];
+  missing_pieces?: Array<{
+    field: string;
+    importance: string;
+    description: string;
+    suggestions?: string[];
+  }>;
+  response_hints?: string[];
+  choices?: Array<{ id: string; label: string; score?: number }>;
 }
 
-export interface AssessmentSuccess {
-  status: 'success';
-  needs_clarification: false;
-  intent: any;
-  message: string;
-}
-
-export interface AssessmentFailed {
-  status: 'failed';
-  needs_clarification: false;
-  error: string;
-}
-
-export type AssessmentResponse = ClarificationRequest | AssessmentSuccess | AssessmentFailed;
-
-// Ingestion API
-export const ingestionAPI = {
-  ingest: (config: any) => apiClient.post('/api/ingestion/ingest', config),
-  validate: (config: any) => apiClient.post('/api/ingestion/validate', config),
-  preview: (config: any) => apiClient.post('/api/ingestion/preview', config),
-  uploadCsv: (formData: FormData) => {
-    return apiClient.post('/api/upload/csv', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+export const agentAPI = {
+  run: async (sessionId: string, query: string, uiContext?: any): Promise<AgentResponse> => {
+    const response = await axios.post(`${API_BASE_URL}/api/agent/run`, {
+      session_id: sessionId,
+      user_query: query,
+      ui_context: uiContext || {},
     });
+    return response.data;
+  },
+  continue: async (sessionId: string, choiceId: string, uiContext?: any): Promise<AgentResponse> => {
+    const response = await axios.post(`${API_BASE_URL}/api/agent/continue`, {
+      session_id: sessionId,
+      choice_id: choiceId,
+      ui_context: uiContext || {},
+    });
+    return response.data;
   },
 };
 
-// Rules API
-export const rulesAPI = {
-  list: () => apiClient.get('/api/rules'),
-  get: (id: string) => apiClient.get(`/api/rules/${id}`),
-  create: (rule: any) => apiClient.post('/api/rules', rule),
-  update: (id: string, rule: any) => apiClient.put(`/api/rules/${id}`, rule),
-  delete: (id: string) => apiClient.delete(`/api/rules/${id}`),
+export const reasoningAPI = {
+  assess: async (query: string): Promise<any> => {
+    const response = await axios.post(`${API_BASE_URL}/api/reasoning/assess`, {
+      query,
+    });
+    return response.data;
+  },
+  clarify: async (query: string, answer: string): Promise<any> => {
+    const response = await axios.post(`${API_BASE_URL}/api/reasoning/clarify`, {
+      query,
+      answer,
+    });
+    return response.data;
+  },
+  query: async (query: string): Promise<any> => {
+    const response = await axios.post(`${API_BASE_URL}/api/reasoning/query`, {
+      query,
+    });
+    return response.data;
+  },
 };
 

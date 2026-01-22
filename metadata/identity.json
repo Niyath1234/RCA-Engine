@@ -18,7 +18,26 @@
     "type": "canonical_key",
     "entity": "customer",
     "canonical": "customer_id",
-    "alternates": []
+    "alternates": [
+      {
+        "system": "core_system",
+        "key": "customer_id"
+      },
+      {
+        "system": "los_system",
+        "key": "cif"
+      }
+    ]
+  },
+  {
+    "type": "key_mapping",
+    "from_system": "core_system",
+    "to_system": "los_system",
+    "from_key": "customer_id",
+    "to_key": "cif",
+    "mapping_type": "direct",
+    "confidence": "high",
+    "description": "customer_id in core_system maps directly to cif in los_system (same identifier, different field name)"
   },
   {
     "type": "key_mapping",

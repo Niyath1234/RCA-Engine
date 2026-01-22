@@ -1,0 +1,13 @@
+cif,applicant_id,applicant_type,religion,social_category,marital_status
+230000002575,APP001,Primary,Hindu,Scheduled Caste,Married
+230000002576,APP002,Primary,Muslim,Scheduled Tribe,Unmarried
+230000002577,APP003,Primary,Hindu,Other Backward Class,Married
+230000002578,APP004,Primary,Christian,Scheduled Caste,Married
+230000002579,APP005,Primary,Muslim,GEN,Unmarried
+230000002580,APP006,Primary,Hindu,Scheduled Tribe,Married
+230000002581,APP007,Primary,Christian,Other Backward Class,Unmarried
+230000002582,APP008,Primary,Muslim,Scheduled Caste,Married
+230000002583,APP009,Primary,Hindu,GEN,Unmarried
+230000002584,APP010,Primary,Christian,Scheduled Tribe,Married
+
+210000006133,APP999,Primary,Hindu,Scheduled Caste,Married

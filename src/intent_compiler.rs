@@ -14,13 +14,15 @@
 
 use crate::error::{RcaError, Result};
 use crate::llm::LlmClient;
+use crate::join_inference::{JoinTypeInferenceEngine, QueryLanguageHints};
+use crate::metadata::Metadata;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn, debug};
 
 /// Intent specification compiled from natural language
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntentSpec {
-    /// Task type: "RCA" or "DV"
+    /// Task type: "RCA", "DV", or "QUERY"
     pub task_type: TaskType,
     
     /// Target metrics (for RCA)
@@ -43,6 +45,14 @@ pub struct IntentSpec {
     
     /// Validation constraint (for DV)
     pub validation_constraint: Option<ValidationConstraintSpec>,
+    
+    /// Join specifications - tables to join and how
+    #[serde(default)]
+    pub joins: Vec<JoinSpec>,
+    
+    /// Tables involved in the query (for complex multi-table queries)
+    #[serde(default)]
+    pub tables: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,6 +60,7 @@ pub struct IntentSpec {
 pub enum TaskType {
     RCA,
     DV,
+    QUERY,  // Direct query: "What is TOS for khatabook as of date?"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +84,49 @@ pub struct ValidationConstraintSpec {
     pub constraint_type: String,
     pub description: String,
     pub details: serde_json::Value,
+}
+
+/// Join specification extracted from query
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinSpec {
+    /// Left table name (or entity/pattern)
+    pub left_table: String,
+    
+    /// Right table name (or entity/pattern)
+    pub right_table: String,
+    
+    /// Join type: "INNER", "LEFT", "RIGHT", "FULL", or null for inference
+    /// Can be inferred from query language:
+    /// - "include all", "all records" -> LEFT or FULL
+    /// - "only matching", "where exists" -> INNER
+    /// - "all from both" -> FULL
+    /// - Default: inferred from lineage relationship
+    pub join_type: Option<String>,
+    
+    /// Join conditions (column pairs)
+    pub conditions: Vec<JoinCondition>,
+    
+    /// Confidence in join type inference (0.0-1.0)
+    #[serde(default)]
+    pub confidence: f64,
+    
+    /// Reasoning for join type choice
+    #[serde(default)]
+    pub reasoning: Option<String>,
+}
+
+/// Join condition - column pair for joining
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinCondition {
+    /// Left column name (or pattern)
+    pub left_column: String,
+    
+    /// Right column name (or pattern)
+    pub right_column: String,
+    
+    /// Optional operator (default: "=")
+    #[serde(default)]
+    pub operator: Option<String>,
 }
 
 // ============================================================================
@@ -144,6 +198,12 @@ pub struct PartialIntent {
     pub constraints: Vec<String>,
     /// Raw keywords extracted
     pub keywords: Vec<String>,
+    /// Detected tables (for multi-table queries)
+    #[serde(default)]
+    pub tables: Vec<String>,
+    /// Detected joins (even if incomplete)
+    #[serde(default)]
+    pub joins: Vec<String>,
 }
 
 /// Confidence assessment result
@@ -289,11 +349,22 @@ impl IntentCompiler {
     }
 
     fn get_confidence_assessment_prompt(&self) -> String {
-        format!(r#"You are an Intent Assessment Agent. Your job is to assess whether a user's query has ENOUGH INFORMATION to perform Root Cause Analysis (RCA) or Data Validation (DV).
+        format!(r#"You are an Intent Assessment Agent. Your job is to assess whether a user's query has ENOUGH INFORMATION to perform Root Cause Analysis (RCA), Data Validation (DV), or Direct Query (QUERY).
+
+REQUIRED INFORMATION FOR QUERY (Direct Query):
+1. SYSTEM (Required): Which system to query (e.g., "khatabook", "tb", "system_a")
+2. METRIC (Required): What metric to retrieve (e.g., "TOS", "recovery", "balance")
+3. GRAIN (Helpful): Level of aggregation (e.g., "customer_id", "loan_id") - can be inferred
+4. TIME_SCOPE (Helpful): As-of date or date range - optional
+5. CONSTRAINTS (Helpful): Filters like "active loans", "for customer X" - optional
 
 REQUIRED INFORMATION FOR RCA:
-1. SYSTEMS (Required): Which systems to compare (e.g., "system_a vs system_b", "khatabook vs tally")
-2. METRICS (Required): What to compare (e.g., "TOS", "recovery", "balance", "outstanding")
+1. SYSTEMS (Required): Determine how many systems are needed based on task type:
+   - Reconciliation/comparison tasks: Multiple systems required (minimum varies by task)
+   - Single system analysis: One system sufficient
+   - Validation tasks: Can work with one or multiple systems
+   - Examples: "system_a vs system_b", "khatabook vs tally", "analyze system_x"
+2. METRICS (Required): What to compare/analyze (e.g., "TOS", "recovery", "balance", "outstanding")
 3. GRAIN (Helpful): Level of comparison (e.g., "loan_id", "customer_id") - can be inferred
 4. CONSTRAINTS (Helpful): Filters like "active loans", "for customer X" - optional
 
@@ -302,11 +373,18 @@ REQUIRED INFORMATION FOR DV:
 2. TARGET (Required): What entity/column to validate
 3. CONDITION (Required): The validation rule
 
+SYSTEM REQUIREMENT REASONING (Chain of Thought):
+- Analyze query keywords to determine task type (reconciliation, validation, single-system analysis)
+- Reconciliation tasks require comparing across multiple systems
+- Single-system analysis requires only one system
+- Validation can work with single or multiple systems
+- The number of systems needed should be determined dynamically based on the task
+
 SCORING RULES:
-- If BOTH systems AND metrics are clear → confidence >= 0.8
-- If systems are clear but metrics are vague → confidence 0.5-0.7
-- If metrics are clear but systems are vague → confidence 0.5-0.7
-- If BOTH are vague/missing → confidence < 0.5
+- If task type is clear AND required systems are detected → confidence >= 0.8
+- If systems are detected but task type is unclear → confidence 0.5-0.7
+- If task type is clear but systems are missing → confidence 0.5-0.7
+- If BOTH task type AND systems are vague/missing → confidence < 0.5
 
 OUTPUT FORMAT (JSON only, no markdown):
 {{
@@ -321,15 +399,17 @@ OUTPUT FORMAT (JSON only, no markdown):
     }}
   ],
   "partial_intent": {{
-    "task_type": "RCA|DV|null",
+    "task_type": "RCA|DV|QUERY|null",
     "systems": ["detected systems"],
     "metrics": ["detected metrics"],
     "entities": ["detected entities"],
     "grain": ["detected grain"],
     "constraints": ["detected constraints as strings"],
-    "keywords": ["extracted keywords"]
+    "keywords": ["extracted keywords"],
+    "tables": ["detected table names"],
+    "joins": ["detected join relationships"]
   }},
-  "reasoning": "Brief explanation of confidence score"
+  "reasoning": "Brief explanation of confidence score including chain of thought about task type and system requirements"
 }}
 
 IMPORTANT:
@@ -382,6 +462,7 @@ IMPORTANT:
                         match s.to_uppercase().as_str() {
                             "RCA" => Some(TaskType::RCA),
                             "DV" => Some(TaskType::DV),
+                            "QUERY" => Some(TaskType::QUERY),
                             _ => None,
                         }
                     }),
@@ -401,6 +482,12 @@ IMPORTANT:
                         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                         .unwrap_or_default(),
                     keywords: partial["keywords"].as_array()
+                        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .unwrap_or_default(),
+                    tables: partial["tables"].as_array()
+                        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .unwrap_or_default(),
+                    joins: partial["joins"].as_array()
                         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                         .unwrap_or_default(),
                 };
@@ -490,6 +577,24 @@ IMPORTANT:
         partial: &PartialIntent,
         original_query: &str,
     ) -> Result<String> {
+        // Determine task type from query to provide context-aware clarification
+        let query_lower = original_query.to_lowercase();
+        let is_reconciliation = query_lower.contains("recon") || 
+                               query_lower.contains("compare") || 
+                               query_lower.contains("mismatch");
+        let task_context = if is_reconciliation {
+            "reconciliation/comparison"
+        } else {
+            "analysis"
+        };
+        
+        // Determine how many systems might be needed
+        let system_requirement = if is_reconciliation {
+            "multiple systems (for comparison)"
+        } else {
+            "one or more systems"
+        };
+        
         // If LLM available, use it to generate natural question
         let prompt = format!(r#"Generate ONE clear, friendly clarification question for a data analyst.
 
@@ -497,9 +602,10 @@ ORIGINAL QUERY: "{}"
 
 WHAT WE UNDERSTOOD:
 - Task type: {:?}
-- Systems: {:?}
+- Systems detected: {:?}
 - Metrics: {:?}
 - Entities: {:?}
+- Task context: {} (requires {})
 
 MISSING REQUIRED INFO:
 {}
@@ -512,16 +618,21 @@ RULES:
 2. Be conversational and friendly
 3. Provide examples where helpful
 4. Keep it concise but complete
-5. Output ONLY the question text, nothing else
+5. Do NOT explicitly mention "two systems" - let the user specify what they need
+6. For reconciliation tasks, ask for systems to compare without specifying a number
+7. Output ONLY the question text, nothing else
 
-EXAMPLE OUTPUT:
-"I need a bit more context to help you. Could you specify: (1) which two systems you want to compare (e.g., khatabook vs tally), (2) what metric you're interested in (e.g., TOS, recovery, balance), and optionally (3) any filters like date range or loan type?"
+EXAMPLE OUTPUTS:
+- For reconciliation: "I need a bit more context. Could you specify: (1) which systems you want to compare (e.g., khatabook vs tally, or system_a vs system_b vs system_c), (2) what metric you're interested in (e.g., TOS, recovery, balance), and optionally (3) any filters like date range or loan type?"
+- For single system: "I need a bit more context. Could you specify: (1) which system you want to analyze, (2) what metric you're interested in, and optionally (3) any filters?"
 "#,
             original_query,
             partial.task_type,
             partial.systems,
             partial.metrics,
             partial.entities,
+            task_context,
+            system_requirement,
             required.iter()
                 .map(|p| format!("- {}: {} (suggestions: {:?})", p.field, p.description, p.suggestions))
                 .collect::<Vec<_>>()
@@ -555,14 +666,22 @@ EXAMPLE OUTPUT:
     ) -> String {
         let mut parts = Vec::new();
         
-        // Add required pieces
+        // Add required pieces - dynamically adjust language based on field
         for (i, piece) in required.iter().enumerate() {
             let suggestions = if piece.suggestions.is_empty() {
                 String::new()
             } else {
                 format!(" (e.g., {})", piece.suggestions.join(", "))
             };
-            parts.push(format!("({}) {}{}", i + 1, piece.description, suggestions));
+            
+            // Customize description for systems field to avoid mentioning specific numbers
+            let description = if piece.field == "systems" {
+                "which systems you want to compare or analyze".to_string()
+            } else {
+                piece.description.clone()
+            };
+            
+            parts.push(format!("({}) {}{}", i + 1, description, suggestions));
         }
         
         // Add helpful pieces
@@ -656,13 +775,115 @@ EXAMPLE OUTPUT:
         let json_str = self.extract_json(json_str);
         
         // Parse JSON
-        let spec: IntentSpec = serde_json::from_str(&json_str)
+        let mut spec: IntentSpec = serde_json::from_str(&json_str)
             .map_err(|e| RcaError::Llm(format!("Invalid JSON: {}", e)))?;
         
-        // Validate schema
+        // Enhance join types using inference engine (if metadata available)
+        // Note: This requires metadata, which we don't have in the compiler.
+        // The enhancement will happen later when metadata is available.
+        
+        // Validate schema structure (syntax validation)
         self.validate_schema(&spec)?;
         
+        // NOTE: Actual table/column validation happens later via IntentValidator
+        // when metadata is available. This prevents hallucinated names from being used.
+        
         Ok(spec)
+    }
+    
+    /// Validate intent against metadata to prevent hallucination
+    /// 
+    /// This should be called after parsing and before SQL generation.
+    /// It ensures all tables, columns, and relationships actually exist.
+    /// Optionally uses learning store for user-approved corrections.
+    pub fn validate_against_metadata(
+        intent: &mut IntentSpec,
+        metadata: &Metadata,
+    ) -> Result<crate::intent_validator::ValidationResult> {
+        Self::validate_against_metadata_with_learning(intent, metadata, None)
+    }
+    
+    /// Validate intent against metadata with optional learning store
+    pub fn validate_against_metadata_with_learning(
+        intent: &mut IntentSpec,
+        metadata: &Metadata,
+        learning_store: Option<std::sync::Arc<crate::learning_store::LearningStore>>,
+    ) -> Result<crate::intent_validator::ValidationResult> {
+        use crate::intent_validator::IntentValidator;
+        
+        let mut validator = IntentValidator::new(metadata.clone());
+        if let Some(store) = learning_store {
+            validator = validator.with_learning_store(store);
+        }
+        
+        let result = validator.resolve_intent(intent)?;
+        
+        if !result.is_valid {
+            warn!("Intent validation found errors: {:?}", result.errors);
+            warn!("Intent validation warnings: {:?}", result.warnings);
+        }
+        
+        Ok(result)
+    }
+    
+    /// Enhance join types in intent spec using intelligent inference engine
+    /// 
+    /// This should be called after parsing when metadata is available.
+    /// It will intelligently infer join types by reasoning like a human analyst.
+    pub fn enhance_join_types(
+        intent: &mut IntentSpec,
+        metadata: &Metadata,
+        original_query: &str,
+    ) -> Result<()> {
+        use crate::join_inference::{JoinTypeInferenceEngine, QueryLanguageHints};
+        
+        let inference_engine = JoinTypeInferenceEngine::new(metadata.clone());
+        let query_hints = QueryLanguageHints::from_query(original_query);
+        
+        // Enhance each join that doesn't have an explicit type
+        for join in &mut intent.joins {
+            if join.join_type.is_none() {
+                // Intelligently infer join type using business context
+                let inference = inference_engine.infer_join_type(
+                    &join.left_table,
+                    &join.right_table,
+                    None, // No explicit type
+                    Some(&query_hints),
+                    Some(&intent.task_type), // Pass task type for context
+                    Some(original_query), // Pass query for context analysis
+                )?;
+                
+                join.join_type = Some(inference.join_type.clone());
+                join.confidence = inference.confidence;
+                join.reasoning = Some(format!(
+                    "Intelligently inferred from {}: {}",
+                    inference.source,
+                    inference.reasoning
+                ));
+                
+                info!(
+                    "Enhanced join {} -> {}: type={}, confidence={:.2}, source={}, reasoning={}",
+                    join.left_table,
+                    join.right_table,
+                    inference.join_type,
+                    inference.confidence,
+                    inference.source,
+                    inference.reasoning
+                );
+                
+                // Log alternatives for transparency
+                if !inference.alternatives.is_empty() {
+                    debug!(
+                        "Alternative join types considered: {:?}",
+                        inference.alternatives.iter()
+                            .map(|a| format!("{} (conf={:.2})", a.join_type, a.confidence))
+                            .collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+        
+        Ok(())
     }
 
     fn extract_json(&self, text: &str) -> String {
@@ -702,11 +923,29 @@ EXAMPLE OUTPUT:
                     return Err(RcaError::Llm("DV task requires validation_constraint".to_string()));
                 }
             }
+            TaskType::QUERY => {
+                if spec.systems.is_empty() {
+                    return Err(RcaError::Llm("QUERY task requires at least one system".to_string()));
+                }
+                if spec.target_metrics.is_empty() {
+                    return Err(RcaError::Llm("QUERY task requires at least one target metric".to_string()));
+                }
+            }
         }
         
         // Validate grain is not empty
         if spec.grain.is_empty() {
             return Err(RcaError::Llm("Grain cannot be empty".to_string()));
+        }
+        
+        // Validate joins if present
+        for join in &spec.joins {
+            if join.left_table.is_empty() || join.right_table.is_empty() {
+                return Err(RcaError::Llm("Join specification requires both left_table and right_table".to_string()));
+            }
+            if join.conditions.is_empty() {
+                warn!("Join between {} and {} has no conditions specified", join.left_table, join.right_table);
+            }
         }
         
         Ok(())
@@ -718,7 +957,7 @@ EXAMPLE OUTPUT:
 You MUST output ONLY valid JSON matching this exact schema:
 
 {
-  "task_type": "RCA" | "DV",
+  "task_type": "RCA" | "DV" | "QUERY",
   "target_metrics": ["metric1", "metric2"],
   "entities": ["entity1", "entity2"],
   "constraints": [
@@ -741,16 +980,70 @@ You MUST output ONLY valid JSON matching this exact schema:
     "constraint_type": "value" | "range" | "set" | "uniqueness" | "nullability" | "referential" | "aggregation" | "cross_column" | "format" | "drift" | "volume" | "freshness" | "schema" | "cardinality" | "composition",
     "description": "human readable description",
     "details": { <any json object with constraint-specific details> }
-  } | null
+  } | null,
+  "joins": [
+    {
+      "left_table": "table1",
+      "right_table": "table2",
+      "join_type": "INNER" | "LEFT" | "RIGHT" | "FULL" | null,
+      "conditions": [
+        {
+          "left_column": "col1",
+          "right_column": "col2",
+          "operator": "=" | null
+        }
+      ],
+      "confidence": 0.0-1.0,
+      "reasoning": "explanation" | null
+    }
+  ],
+  "tables": ["table1", "table2"]
 }
 
+JOIN INFERENCE RULES:
+1. Extract join information from query language:
+   - "join X with Y", "combine X and Y", "X joined to Y" → Extract tables and infer join
+   - "include all records from X" → LEFT join (preserve all from X)
+   - "only matching records", "where X exists in Y" → INNER join
+   - "all records from both tables" → FULL join
+   - "X that have Y" → LEFT join (X is left, Y is right)
+   - "X where Y exists" → INNER join
+   - "X including Y" → LEFT join
+   - "X excluding Y" → LEFT join with NOT EXISTS filter
+
+2. Infer join conditions from query:
+   - Look for explicit join keys: "on customer_id", "by loan_id", "using account_number"
+   - Infer from entity relationships: customer -> loan (customer_id), loan -> transaction (loan_id)
+   - Common patterns: "X.customer_id = Y.customer_id", "X.id = Y.foreign_id"
+   - If not specified, use common foreign key patterns (entity_id, id, etc.)
+
+3. Join type inference priority:
+   a) Explicit in query ("inner join", "left join", etc.) → Use that
+   b) Query language hints ("all", "include all", "only matching") → Infer from language
+   c) If not specified → Set to null (will be inferred from lineage metadata later)
+
+4. For complex multi-table joins:
+   - Extract all mentioned tables into "tables" array
+   - Create JoinSpec for each pair that needs joining
+   - Order matters: first join is left_table, subsequent joins chain
+
+5. Confidence scoring:
+   - 1.0: Explicit join type and conditions in query
+   - 0.8-0.9: Clear language hints + explicit conditions
+   - 0.6-0.7: Language hints but inferred conditions
+   - 0.4-0.5: Only tables mentioned, no clear join info
+   - <0.4: Ambiguous, should ask for clarification
+
 Rules:
-- For RCA: systems and target_metrics are required
+- For RCA: systems (2+) and target_metrics are required
 - For DV: validation_constraint is required
+- For QUERY: systems (1+) and target_metrics are required
 - grain is always required (cannot be empty)
 - IMPORTANT: grain should be entity-level keys (e.g., ["loan_id"], ["customer_id"], ["account_id"])
 - DO NOT use filter values as grain (e.g., if query says "for PERSONAL loans", grain should be ["loan_id"], NOT ["loan_type"])
 - If query mentions a filter like "for PERSONAL loans", add it as a constraint with column="loan_type", operator="=", value="PERSONAL"
+- Extract ALL join information from query - even if implicit
+- If multiple tables are mentioned, create join specs for relationships
 - Output ONLY the JSON object, no markdown, no explanation, no code blocks
 - If uncertain about a field, use null or empty array
 - Be precise and extract all relevant information from the query"#.to_string()

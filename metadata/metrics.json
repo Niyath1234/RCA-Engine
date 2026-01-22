@@ -1,29 +1,21 @@
 [
   {
-    "id": "tos",
-    "name": "Total Outstanding",
-    "description": "Total outstanding amount across all loans including principal and interest",
-    "grain": ["loan_id"],
-    "precision": 2,
-    "null_policy": "zero",
-    "unit": "currency",
-    "versions": [
-      {
-        "version": "v1",
-        "description": "Standard TOS calculation - sum of principal and interest outstanding"
-      }
-    ],
-    "aliases": ["outstanding balance", "total outstanding", "outstanding", "balance"]
+    "id": "minority_category",
+    "name": "Minority Category",
+    "description": "Social/Minority category",
+    "grain": ["customer_id"],
+    "precision": 0,
+    "null_policy": "allow",
+    "unit": "category"
   },
   {
-    "id": "pos",
-    "name": "Principal Outstanding",
-    "description": "Principal amount outstanding (excluding interest)",
-    "grain": ["loan_id"],
-    "precision": 2,
-    "null_policy": "zero",
-    "unit": "currency",
-    "aliases": ["principal outstanding", "principal balance", "principal"]
+    "id": "social_category",
+    "name": "Social Category",
+    "description": "Social/Minority category",
+    "grain": ["cif"],
+    "precision": 0,
+    "null_policy": "allow",
+    "unit": "category"
   }
 ]
 

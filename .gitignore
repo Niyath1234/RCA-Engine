@@ -10,3 +10,6 @@ data/*.parquet
 tables/
 
 
+node_modules/
+hypergraph-visualizer/frontend/node_modules/
+ui/node_modules/

@@ -1,0 +1,170 @@
+{
+  "tables": [
+    {
+      "name": "customer_accounts",
+      "system": "core_system",
+      "entity": "customer",
+      "primary_key": ["customer_id"],
+      "time_column": null,
+      "columns": [
+        {
+          "name": "customer_id",
+          "type": "string",
+          "description": "Customer identifier"
+        },
+        {
+          "name": "branch_code",
+          "type": "string",
+          "description": "Branch code"
+        },
+        {
+          "name": "is_active",
+          "type": "integer",
+          "description": "Active flag (1=active, 0=inactive)"
+        }
+      ],
+      "grain": ["customer_id"],
+      "labels": ["customer", "account", "core_system"],
+      "path": "minority_recon/customer_accounts.csv"
+    },
+    {
+      "name": "customer_ind_info",
+      "system": "core_system",
+      "entity": "customer",
+      "primary_key": ["customer_id"],
+      "time_column": null,
+      "columns": [
+        {
+          "name": "customer_id",
+          "type": "string",
+          "description": "Customer identifier"
+        },
+        {
+          "name": "religion_code",
+          "type": "string",
+          "description": "Religion code"
+        },
+        {
+          "name": "minority_code",
+          "type": "string",
+          "description": "Minority code"
+        },
+        {
+          "name": "sex_code",
+          "type": "integer",
+          "description": "Sex code (1=Male, 2=Female, 3=Other)"
+        },
+        {
+          "name": "is_active",
+          "type": "integer",
+          "description": "Active flag (1=active, 0=inactive)"
+        }
+      ],
+      "grain": ["customer_id"],
+      "labels": ["customer", "demographics", "core_system"],
+      "path": "minority_recon/customer_ind_info.csv"
+    },
+    {
+      "name": "picklist_type_data",
+      "system": "core_system",
+      "entity": "lookup",
+      "primary_key": ["type_code", "data_code"],
+      "time_column": null,
+      "columns": [
+        {
+          "name": "type_code",
+          "type": "integer",
+          "description": "Picklist type code (49=religion, 91=religion_alt, 190=minority, 4=state)"
+        },
+        {
+          "name": "data_code",
+          "type": "string",
+          "description": "Data code"
+        },
+        {
+          "name": "data_description",
+          "type": "string",
+          "description": "Data description"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "description": "Active flag"
+        }
+      ],
+      "grain": ["type_code", "data_code"],
+      "labels": ["lookup", "picklist", "core_system"],
+      "path": "minority_recon/picklist_type_data.csv"
+    },
+    {
+      "name": "branch_master",
+      "system": "core_system",
+      "entity": "branch",
+      "primary_key": ["branch_code"],
+      "time_column": null,
+      "columns": [
+        {
+          "name": "branch_code",
+          "type": "string",
+          "description": "Branch code"
+        },
+        {
+          "name": "state_code",
+          "type": "string",
+          "description": "State code"
+        },
+        {
+          "name": "is_active",
+          "type": "integer",
+          "description": "Active flag (1=active, 0=inactive)"
+        }
+      ],
+      "grain": ["branch_code"],
+      "labels": ["branch", "master", "core_system"],
+      "path": "minority_recon/branch_master.csv"
+    },
+    {
+      "name": "asset_sourcing_personal_details_v2",
+      "system": "los_system",
+      "entity": "customer",
+      "primary_key": ["cif"],
+      "time_column": null,
+      "columns": [
+        {
+          "name": "cif",
+          "type": "string",
+          "description": "Customer identifier (CIF)"
+        },
+        {
+          "name": "applicant_id",
+          "type": "string",
+          "description": "Applicant identifier"
+        },
+        {
+          "name": "applicant_type",
+          "type": "string",
+          "description": "Applicant type"
+        },
+        {
+          "name": "religion",
+          "type": "string",
+          "description": "Religion"
+        },
+        {
+          "name": "social_category",
+          "type": "string",
+          "description": "Social category"
+        },
+        {
+          "name": "marital_status",
+          "type": "string",
+          "description": "Marital status"
+        }
+      ],
+      "grain": ["cif"],
+      "labels": ["customer", "los", "los_system"],
+      "path": "minority_recon/asset_sourcing_personal_details_v2.csv"
+    }
+  ]
+}
+

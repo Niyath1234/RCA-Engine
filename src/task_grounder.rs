@@ -93,6 +93,20 @@ impl TaskGrounder {
         let mut unresolved_fields = Vec::new();
         
         match intent.task_type {
+            TaskType::QUERY => {
+                // Direct query - single system, find tables for the system and metric
+                for system in &intent.systems {
+                    for metric in &intent.target_metrics {
+                        match self.find_tables_for_query(system, metric, &intent.grain).await {
+                            Ok(tables) => candidate_tables.extend(tables),
+                            Err(e) => {
+                                warn!("Failed to find tables for {} {}: {}", system, metric, e);
+                                unresolved_fields.push(format!("tables for {} {}", system, metric));
+                            }
+                        }
+                    }
+                }
+            }
             TaskType::RCA => {
                 // Find tables for each system and metric
                 for system in &intent.systems {
@@ -400,6 +414,54 @@ impl TaskGrounder {
         
         // Sort by confidence
         candidates.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        
+        Ok(candidates)
+    }
+
+    /// Find tables for a direct query (single system, single metric)
+    async fn find_tables_for_query(
+        &self,
+        system: &str,
+        metric: &str,
+        grain: &[String],
+    ) -> Result<Vec<TableCandidate>> {
+        let mut candidates = Vec::new();
+        
+        // Find tables for this system
+        let system_tables: Vec<_> = self.metadata.tables
+            .iter()
+            .filter(|t| self.fuzzy_matcher.is_match(&t.system, system))
+            .collect();
+        
+        if system_tables.is_empty() {
+            return Err(RcaError::Metadata(format!("No tables found for system: {}", system)));
+        }
+        
+        // Find rules for this system and metric
+        let matching_rules = self.metadata.get_rules_for_system_metric(system, metric);
+        
+        // Use rule's source_entities to filter tables
+        let relevant_entities: HashSet<String> = matching_rules.iter()
+            .flat_map(|r| r.computation.source_entities.iter().cloned())
+            .collect();
+        
+        for table in system_tables {
+            if relevant_entities.contains(&table.entity) || matching_rules.is_empty() {
+                let columns: Vec<String> = table.columns.as_ref()
+                    .map(|cols| cols.iter().map(|c| c.name.clone()).collect())
+                    .unwrap_or_default();
+                
+                candidates.push(TableCandidate {
+                    table_name: table.name.clone(),
+                    system: system.to_string(),
+                    entity: table.entity.clone(),
+                    grain: grain.to_vec(),
+                    confidence: 0.8,
+                    reason: format!("Table for {} metric in {} system", metric, system),
+                    columns,
+                });
+            }
+        }
         
         Ok(candidates)
     }

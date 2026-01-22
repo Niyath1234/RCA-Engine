@@ -2,6 +2,7 @@ use crate::error::{RcaError, Result};
 use crate::metadata::{Metadata, Rule, PipelineOp, Table};
 use crate::operators::RelationalEngine;
 use crate::time::TimeResolver;
+use crate::semantic_column_resolver::SemanticColumnResolver;
 use polars::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -23,16 +24,135 @@ impl RuleCompiler {
     
     /// Compile a rule into an execution plan by automatically constructing pipeline
     /// from rule specification + metadata
+    /// 
+    /// If rule is not found, attempts automatic inference using semantic column resolution
     pub fn compile(&self, rule_id: &str) -> Result<ExecutionPlan> {
-        let rule = self.metadata
-            .get_rule(rule_id)
-            .ok_or_else(|| RcaError::Execution(format!("Rule not found: {}", rule_id)))?;
+        // First, try to find the rule in metadata
+        let rule = if let Some(rule) = self.metadata.get_rule(rule_id) {
+            rule.clone()
+        } else {
+            // Rule not found - try to infer it using semantic resolution
+            // Parse rule_id to extract system and metric (format: "{system}_{metric}_rule" or similar)
+            self.try_infer_rule_from_id(rule_id)?
+                .ok_or_else(|| RcaError::Execution(format!(
+                    "Rule not found: {}. Tried automatic inference but could not resolve table/column mapping.",
+                    rule_id
+                )))?
+        };
         
         // Automatically construct pipeline from rule specification
-        let steps = self.construct_pipeline(rule)?;
+        let steps = self.construct_pipeline(&rule)?;
         
         Ok(ExecutionPlan {
             rule_id: rule_id.to_string(),
+            rule: rule.clone(),
+            steps,
+        })
+    }
+
+    /// Try to infer a rule from its ID using semantic column resolution
+    /// 
+    /// Rule IDs typically follow patterns like:
+    /// - "{system}_{metric}_rule" (e.g., "los_system_social_category_rule")
+    /// - "{system}_{metric}" (e.g., "los_system_social_category")
+    fn try_infer_rule_from_id(&self, rule_id: &str) -> Result<Option<Rule>> {
+        let resolver = SemanticColumnResolver::new(self.metadata.clone());
+        
+        // Try to parse system and metric from rule_id
+        // Common patterns:
+        // 1. "{system}_{metric}_rule" -> extract system and metric
+        // 2. "{system}_{metric}" -> extract system and metric
+        
+        let parts: Vec<&str> = rule_id.split('_').collect();
+        if parts.len() < 2 {
+            return Ok(None);
+        }
+
+        // Try to find system and metric
+        // Look for known systems in metadata
+        let known_systems: Vec<String> = self.metadata.tables.iter()
+            .map(|t| t.system.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        // Try different parsing strategies
+        for system in &known_systems {
+            // Strategy 1: "{system}_{metric}_rule"
+            if rule_id.starts_with(&format!("{}_", system)) && rule_id.ends_with("_rule") {
+                let metric_part = &rule_id[system.len() + 1..rule_id.len() - 5]; // Remove "{system}_" and "_rule"
+                if let Some(rule) = resolver.auto_generate_rule(metric_part, system, None, None)? {
+                    return Ok(Some(rule));
+                }
+            }
+            
+            // Strategy 2: "{system}_{metric}"
+            if rule_id.starts_with(&format!("{}_", system)) {
+                let metric_part = &rule_id[system.len() + 1..];
+                if let Some(rule) = resolver.auto_generate_rule(metric_part, system, None, None)? {
+                    return Ok(Some(rule));
+                }
+            }
+        }
+
+        // Strategy 3: Try to find metric name in rule_id and search across all systems
+        // Extract potential metric name (everything after last system match or common patterns)
+        let potential_metrics = vec![
+            rule_id.to_string(),
+            rule_id.replace("_rule", ""),
+            rule_id.replace("_", " "),
+        ];
+
+        for metric in potential_metrics {
+            let all_resolutions = resolver.find_columns_for_metric(&metric);
+            if !all_resolutions.is_empty() {
+                // Use the first system found (or could use highest confidence)
+                for (system, resolutions) in all_resolutions {
+                    if !resolutions.is_empty() {
+                        if let Some(rule) = resolver.auto_generate_rule(&metric, &system, None, None)? {
+                            return Ok(Some(rule));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Compile a rule by metric name and system (with automatic inference)
+    /// 
+    /// This is the preferred method when you have a metric name and system
+    /// but don't know the exact rule ID. It will:
+    /// 1. Try to find an existing rule
+    /// 2. If not found, use semantic resolution to auto-generate one
+    pub fn compile_by_metric(
+        &self,
+        metric_name: &str,
+        system: &str,
+    ) -> Result<ExecutionPlan> {
+        // First, try to find existing rule
+        let existing_rule = self.metadata.rules.iter()
+            .find(|r| r.metric == metric_name && r.system == system);
+
+        let rule = if let Some(rule) = existing_rule {
+            rule.clone()
+        } else {
+            // No existing rule - use semantic resolution to auto-generate
+            let resolver = SemanticColumnResolver::new(self.metadata.clone());
+            resolver.auto_generate_rule(metric_name, system, None, None)?
+                .ok_or_else(|| RcaError::Execution(format!(
+                    "Could not find or infer rule for metric '{}' in system '{}'. \
+                    No matching column found in metadata.",
+                    metric_name, system
+                )))?
+        };
+
+        // Construct pipeline
+        let steps = self.construct_pipeline(&rule)?;
+        
+        Ok(ExecutionPlan {
+            rule_id: format!("{}_{}_rule", system, metric_name.replace(" ", "_")),
             rule: rule.clone(),
             steps,
         })
