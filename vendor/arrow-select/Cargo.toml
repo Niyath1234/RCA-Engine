@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.85"
 name = "arrow-select"
-version = "57.1.0"
+version = "57.2.0"
 authors = ["Apache Arrow <dev@arrow.apache.org>"]
 build = false
 include = [
@@ -49,16 +49,16 @@ version = "0.8"
 default-features = false
 
 [dependencies.arrow-array]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-buffer]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-data]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-schema]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.num-traits]
 version = "0.2.19"

@@ -56,7 +56,7 @@ dashmap = "7.0.0-rc2"
 # zstd = "0.13"
 
 # PostgreSQL support
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"], default-features = false }
 
 [[bin]]
 name = "server"

@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.85"
 name = "arrow"
-version = "57.1.0"
+version = "57.2.0"
 authors = ["Apache Arrow <dev@arrow.apache.org>"]
 build = false
 include = [
@@ -372,50 +372,50 @@ harness = false
 required-features = ["test_utils"]
 
 [dependencies.arrow-arith]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-array]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-buffer]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-cast]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-csv]
-version = "57.1.0"
+version = "57.2.0"
 optional = true
 
 [dependencies.arrow-data]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-ipc]
-version = "57.1.0"
+version = "57.2.0"
 optional = true
 
 [dependencies.arrow-json]
-version = "57.1.0"
+version = "57.2.0"
 optional = true
 
 [dependencies.arrow-ord]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-pyarrow]
-version = "57.1.0"
+version = "57.2.0"
 optional = true
 
 [dependencies.arrow-row]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-schema]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-select]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-string]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.half]
 version = "2.1"
@@ -441,7 +441,7 @@ features = ["clock"]
 default-features = false
 
 [dev-dependencies.criterion]
-version = "0.7.0"
+version = "0.8.0"
 default-features = false
 
 [dev-dependencies.half]

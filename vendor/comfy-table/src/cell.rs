@@ -1,7 +1,6 @@
+use crate::style::CellAlignment;
 #[cfg(feature = "tty")]
 use crate::{Attribute, Color};
-
-use crate::style::CellAlignment;
 
 /// A stylable table cell with content.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -26,7 +25,11 @@ impl Cell {
     /// Create a new Cell
     #[allow(clippy::needless_pass_by_value)]
     pub fn new<T: ToString>(content: T) -> Self {
-        let content = content.to_string();
+        Self::new_owned(content.to_string())
+    }
+
+    /// Create a new Cell from an owned String
+    pub fn new_owned(content: String) -> Self {
         #[cfg_attr(not(feature = "custom_styling"), allow(unused_mut))]
         let mut split_content: Vec<String> = content.split('\n').map(ToString::to_string).collect();
 
@@ -67,11 +70,9 @@ impl Cell {
     /// Setting this overwrites alignment settings of the
     /// [Column](crate::column::Column::set_cell_alignment) for this specific cell.
     /// ```
-    /// use comfy_table::CellAlignment;
-    /// use comfy_table::Cell;
+    /// use comfy_table::{Cell, CellAlignment};
     ///
-    /// let mut cell = Cell::new("Some content")
-    ///     .set_alignment(CellAlignment::Center);
+    /// let mut cell = Cell::new("Some content").set_alignment(CellAlignment::Center);
     /// ```
     #[must_use]
     pub fn set_alignment(mut self, alignment: CellAlignment) -> Self {
@@ -84,11 +85,9 @@ impl Cell {
     ///
     /// Look at [Color](crate::Color) for a list of all possible Colors.
     /// ```
-    /// use comfy_table::Color;
-    /// use comfy_table::Cell;
+    /// use comfy_table::{Cell, Color};
     ///
-    /// let mut cell = Cell::new("Some content")
-    ///     .fg(Color::Red);
+    /// let mut cell = Cell::new("Some content").fg(Color::Red);
     /// ```
     #[cfg(feature = "tty")]
     #[must_use]
@@ -102,11 +101,9 @@ impl Cell {
     ///
     /// Look at [Color](crate::Color) for a list of all possible Colors.
     /// ```
-    /// use comfy_table::Color;
-    /// use comfy_table::Cell;
+    /// use comfy_table::{Cell, Color};
     ///
-    /// let mut cell = Cell::new("Some content")
-    ///     .bg(Color::Red);
+    /// let mut cell = Cell::new("Some content").bg(Color::Red);
     /// ```
     #[cfg(feature = "tty")]
     #[must_use]
@@ -121,11 +118,9 @@ impl Cell {
     ///
     /// Look at [Attribute](crate::Attribute) for a list of all possible Colors.
     /// ```
-    /// use comfy_table::Attribute;
-    /// use comfy_table::Cell;
+    /// use comfy_table::{Attribute, Cell};
     ///
-    /// let mut cell = Cell::new("Some content")
-    ///     .add_attribute(Attribute::Bold);
+    /// let mut cell = Cell::new("Some content").add_attribute(Attribute::Bold);
     /// ```
     #[cfg(feature = "tty")]
     #[must_use]
@@ -169,7 +164,7 @@ pub struct Cells(pub Vec<Cell>);
 /// By default this is implemented for all Iterators over items implementing [ToString].
 ///
 /// ```
-/// use comfy_table::{Row, Cells};
+/// use comfy_table::{Cells, Row};
 ///
 /// let cells_string: Cells = vec!["One", "Two", "Three"].into();
 /// let cells_integer: Cells = vec![1, 2, 3, 4].into();

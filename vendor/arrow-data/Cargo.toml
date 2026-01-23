@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.85"
 name = "arrow-data"
-version = "57.1.0"
+version = "57.2.0"
 authors = ["Apache Arrow <dev@arrow.apache.org>"]
 build = false
 include = [
@@ -49,10 +49,10 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies.arrow-buffer]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-schema]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.half]
 version = "2.1"

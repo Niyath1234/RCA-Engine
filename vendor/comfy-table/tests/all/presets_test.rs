@@ -1,7 +1,5 @@
+use comfy_table::{presets::*, *};
 use pretty_assertions::assert_eq;
-
-use comfy_table::presets::*;
-use comfy_table::*;
 
 fn get_preset_table() -> Table {
     let mut table = Table::new();
@@ -214,6 +212,26 @@ fn test_nothing_without_padding() {
 Hello  there
 a      b
 c      d";
+    println!("{expected}");
+    assert_eq!(expected, "\n".to_string() + &table.trim_fmt());
+}
+
+#[test]
+fn test_no_vertical_styling() {
+    let mut table = Table::new();
+    table
+        .set_header(vec!["Hello", "there", "again"])
+        .add_row(vec!["a", "b", "something different"])
+        .add_row(vec!["omfg why though", "d", "f"]);
+
+    table.load_preset("||   -              ");
+
+    println!("{table}");
+    let expected = "
+| Hello            there  again               |
+ ---------------------------------------------
+| a                b      something different |
+| omfg why though  d      f                   |";
     println!("{expected}");
     assert_eq!(expected, "\n".to_string() + &table.trim_fmt());
 }

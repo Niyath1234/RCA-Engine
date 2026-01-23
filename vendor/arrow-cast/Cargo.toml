@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.85"
 name = "arrow-cast"
-version = "57.1.0"
+version = "57.2.0"
 authors = ["Apache Arrow <dev@arrow.apache.org>"]
 build = false
 include = [
@@ -69,22 +69,22 @@ path = "benches/parse_timestamp.rs"
 harness = false
 
 [dependencies.arrow-array]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-buffer]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-data]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-ord]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-schema]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.arrow-select]
-version = "57.1.0"
+version = "57.2.0"
 
 [dependencies.atoi]
 version = "2.0.0"
@@ -125,7 +125,7 @@ default-features = false
 version = "1.0.16"
 
 [dev-dependencies.criterion]
-version = "0.7.0"
+version = "0.8.0"
 default-features = false
 
 [dev-dependencies.half]

@@ -41,9 +41,9 @@
 //! ![performance](https://raw.githubusercontent.com/dtolnay/zmij/master/dtoa-benchmark.png)
 
 #![no_std]
-#![doc(html_root_url = "https://docs.rs/zmij/1.0.12")]
+#![doc(html_root_url = "https://docs.rs/zmij/1.0.15")]
 #![deny(unsafe_op_in_unsafe_fn)]
-#![allow(non_camel_case_types)]
+#![allow(non_camel_case_types, non_snake_case)]
 #![allow(
     clippy::blocks_in_conditions,
     clippy::cast_possible_truncation,
@@ -58,12 +58,18 @@
     clippy::never_loop,
     clippy::redundant_else,
     clippy::similar_names,
+    clippy::too_many_arguments,
     clippy::too_many_lines,
     clippy::unreadable_literal,
+    clippy::used_underscore_items,
     clippy::while_immutable_condition,
     clippy::wildcard_imports
 )]
 
+#[cfg(zmij_no_select_unpredictable)]
+mod hint;
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2", not(miri)))]
+mod stdarch_x86;
 #[cfg(test)]
 mod tests;
 mod traits;
@@ -97,17 +103,20 @@ struct uint128 {
     lo: u64,
 }
 
+// Use umul128_hi64 for division.
+const USE_UMUL128_HI64: bool = cfg!(target_vendor = "apple");
+
 // Computes 128-bit result of multiplication of two 64-bit unsigned integers.
 const fn umul128(x: u64, y: u64) -> u128 {
     x as u128 * y as u128
 }
 
-const fn umul128_upper64(x: u64, y: u64) -> u64 {
+const fn umul128_hi64(x: u64, y: u64) -> u64 {
     (umul128(x, y) >> 64) as u64
 }
 
 #[cfg_attr(feature = "no-panic", no_panic)]
-fn umul192_upper128(x_hi: u64, x_lo: u64, y: u64) -> uint128 {
+fn umul192_hi128(x_hi: u64, x_lo: u64, y: u64) -> uint128 {
     let p = umul128(x_hi, y);
     let lo = (p as u64).wrapping_add((umul128(x_lo, y) >> 64) as u64);
     uint128 {
@@ -116,16 +125,16 @@ fn umul192_upper128(x_hi: u64, x_lo: u64, y: u64) -> uint128 {
     }
 }
 
-// Computes upper 64 bits of multiplication of x and y, discards the least
+// Computes high 64 bits of multiplication of x and y, discards the least
 // significant bit and rounds to odd, where x = uint128_t(x_hi << 64) | x_lo.
 #[cfg_attr(feature = "no-panic", no_panic)]
-fn umul_upper_inexact_to_odd<UInt>(x_hi: u64, x_lo: u64, y: UInt) -> UInt
+fn umulhi_inexact_to_odd<UInt>(x_hi: u64, x_lo: u64, y: UInt) -> UInt
 where
     UInt: traits::UInt,
 {
     let num_bits = mem::size_of::<UInt>() * 8;
     if num_bits == 64 {
-        let p = umul192_upper128(x_hi, x_lo, y.into());
+        let p = umul192_hi128(x_hi, x_lo, y.into());
         UInt::truncate(p.hi | u64::from((p.lo >> 1) != 0))
     } else {
         let p = (umul128(x_hi, y.into()) >> 32) as u64;
@@ -153,8 +162,8 @@ trait FloatTraits: traits::Float {
         bits & (Self::IMPLICIT_BIT - Self::SigType::from(1))
     }
 
-    fn get_exp(bits: Self::SigType) -> i32 {
-        (bits >> Self::NUM_SIG_BITS).into() as i32 & Self::EXP_MASK
+    fn get_exp(bits: Self::SigType) -> i64 {
+        (bits >> Self::NUM_SIG_BITS).into() as i64 & i64::from(Self::EXP_MASK)
     }
 }
 
@@ -180,13 +189,14 @@ impl FloatTraits for f64 {
     }
 }
 
+#[repr(C, align(64))]
 struct Pow10SignificandsTable {
     data: [u64; Self::NUM_POW10 * 2],
 }
 
 impl Pow10SignificandsTable {
+    const SPLIT_TABLES: bool = cfg!(target_arch = "aarch64");
     const NUM_POW10: usize = 617;
-    const SPLIT_TABLES: bool = true;
 
     unsafe fn get_unchecked(&self, dec_exp: i32) -> uint128 {
         const DEC_EXP_MIN: i32 = -292;
@@ -242,8 +252,8 @@ static POW10_SIGNIFICANDS: Pow10SignificandsTable = {
         w2: u64, // most significant
     }
 
-    // first element, rounded up to cancel out rounding down in the
-    // multiplication, and minimise significant bits
+    // First element, rounded up to cancel out rounding down in the
+    // multiplication, and minimize significant bits.
     let mut current = uint192 {
         w0: 0xe000000000000000,
         w1: 0x25e8e89c13bb0f7a,
@@ -260,12 +270,12 @@ static POW10_SIGNIFICANDS: Pow10SignificandsTable = {
             data[i * 2 + 1] = current.w1;
         }
 
-        let h0: u64 = umul128_upper64(current.w0, ten);
-        let h1: u64 = umul128_upper64(current.w1, ten);
+        let h0: u64 = umul128_hi64(current.w0, ten);
+        let h1: u64 = umul128_hi64(current.w1, ten);
 
         let c0: u64 = h0.wrapping_add(current.w1.wrapping_mul(ten));
         let c1: u64 = ((c0 < h0) as u64 + h1).wrapping_add(current.w2.wrapping_mul(ten));
-        let c2: u64 = (c1 < h1) as u64 + umul128_upper64(current.w2, ten); // dodgy carry
+        let c2: u64 = (c1 < h1) as u64 + umul128_hi64(current.w2, ten); // dodgy carry
 
         // normalise
         if (c2 >> 63) != 0 {
@@ -288,6 +298,93 @@ static POW10_SIGNIFICANDS: Pow10SignificandsTable = {
     Pow10SignificandsTable { data }
 };
 
+// Computes the decimal exponent as floor(log10(2**bin_exp)) if regular or
+// floor(log10(3/4 * 2**bin_exp)) otherwise, without branching.
+const fn compute_dec_exp(bin_exp: i32, regular: bool) -> i32 {
+    debug_assert!(bin_exp >= -1334 && bin_exp <= 2620);
+    // log10_3_over_4_sig = -log10(3/4) * 2**log10_2_exp rounded to a power of 2
+    const LOG10_3_OVER_4_SIG: i32 = 131_072;
+    // log10_2_sig = round(log10(2) * 2**log10_2_exp)
+    const LOG10_2_SIG: i32 = 315_653;
+    const LOG10_2_EXP: i32 = 20;
+    (bin_exp * LOG10_2_SIG - !regular as i32 * LOG10_3_OVER_4_SIG) >> LOG10_2_EXP
+}
+
+const fn do_compute_exp_shift(bin_exp: i32, dec_exp: i32) -> u8 {
+    debug_assert!(dec_exp >= -350 && dec_exp <= 350);
+    // log2_pow10_sig = round(log2(10) * 2**log2_pow10_exp) + 1
+    const LOG2_POW10_SIG: i32 = 217_707;
+    const LOG2_POW10_EXP: i32 = 16;
+    // pow10_bin_exp = floor(log2(10**-dec_exp))
+    let pow10_bin_exp = (-dec_exp * LOG2_POW10_SIG) >> LOG2_POW10_EXP;
+    // pow10 = ((pow10_hi << 64) | pow10_lo) * 2**(pow10_bin_exp - 127)
+    (bin_exp + pow10_bin_exp + 1) as u8
+}
+
+struct ExpShiftTable {
+    data: [u8; if Self::ENABLE {
+        Self::NUM_EXPS as usize
+    } else {
+        1
+    }],
+}
+
+impl ExpShiftTable {
+    const ENABLE: bool = true;
+    const NUM_EXPS: i32 = f64::EXP_MASK + 1;
+    const OFFSET: i32 = f64::NUM_SIG_BITS + f64::EXP_BIAS;
+}
+
+static EXP_SHIFTS: ExpShiftTable = {
+    let mut data = [0u8; if ExpShiftTable::ENABLE {
+        ExpShiftTable::NUM_EXPS as usize
+    } else {
+        1
+    }];
+
+    if ExpShiftTable::ENABLE {
+        let mut raw_exp = 0;
+        while raw_exp < ExpShiftTable::NUM_EXPS {
+            let mut bin_exp = raw_exp - ExpShiftTable::OFFSET;
+            if raw_exp == 0 {
+                bin_exp += 1;
+            }
+            let dec_exp = compute_dec_exp(bin_exp, true);
+            data[raw_exp as usize] = do_compute_exp_shift(bin_exp, dec_exp) as u8;
+            raw_exp += 1;
+        }
+    }
+
+    ExpShiftTable { data }
+};
+
+// Computes a shift so that, after scaling by a power of 10, the intermediate
+// result always has a fixed 128-bit fractional part (for double).
+//
+// Different binary exponents can map to the same decimal exponent, but place
+// the decimal point at different bit positions. The shift compensates for this.
+//
+// For example, both 3 * 2**59 and 3 * 2**60 have dec_exp = 2, but dividing by
+// 10^dec_exp puts the decimal point in different bit positions:
+//   3 * 2**59 / 100 = 1.72...e+16  (needs shift = 1 + 1)
+//   3 * 2**60 / 100 = 3.45...e+16  (needs shift = 2 + 1)
+unsafe fn compute_exp_shift<UInt, const ONLY_REGULAR: bool>(bin_exp: i32, dec_exp: i32) -> u8
+where
+    UInt: traits::UInt,
+{
+    let num_bits = mem::size_of::<UInt>() * 8;
+    if num_bits == 64 && ExpShiftTable::ENABLE && ONLY_REGULAR {
+        unsafe {
+            *EXP_SHIFTS
+                .data
+                .as_ptr()
+                .add((bin_exp + ExpShiftTable::OFFSET) as usize)
+        }
+    } else {
+        do_compute_exp_shift(bin_exp, dec_exp)
+    }
+}
+
 #[cfg_attr(feature = "no-panic", no_panic)]
 fn count_trailing_nonzeros(x: u64) -> usize {
     // We count the number of bytes until there are only zeros left.
@@ -302,7 +399,7 @@ fn count_trailing_nonzeros(x: u64) -> usize {
     // bit is unused we can avoid the zero check by shifting the datum left by
     // one and inserting a sentinel bit at the end. This can be faster than the
     // automatically inserted range check.
-    (70 - ((x.to_le() << 1) | 1).leading_zeros()) as usize / 8
+    (70 - ((x.to_le() << 1) | 1).leading_zeros() as usize) / 8
 }
 
 // Align data since unaligned access may be slower when crossing a
@@ -330,26 +427,44 @@ unsafe fn digits2(value: usize) -> &'static u16 {
     }
 }
 
+const DIV10K_EXP: i32 = 40;
+const DIV10K_SIG: u32 = ((1u64 << DIV10K_EXP) / 10000 + 1) as u32;
+const NEG10K: u32 = ((1u64 << 32) - 10000) as u32;
+const DIV100_EXP: i32 = 19;
+const DIV100_SIG: u32 = (1 << DIV100_EXP) / 100 + 1;
+const NEG100: u32 = (1 << 16) - 100;
+const DIV10_EXP: i32 = 10;
+const DIV10_SIG: u32 = (1 << DIV10_EXP) / 10 + 1;
+const NEG10: u32 = (1 << 8) - 10;
+// (1 << 63) / 5 == (1 << 64) / 10 without an intermediate int128.
+#[cfg(all(any(target_arch = "aarch64", target_arch = "x86_64"), not(miri)))]
+const DIV10_SIG64: u64 = (1 << 63) / 5 + 1;
+
+const ZEROS: u64 = 0x0101010101010101 * b'0' as u64;
+
 #[cfg_attr(feature = "no-panic", no_panic)]
 fn to_bcd8(abcdefgh: u64) -> u64 {
     // An optimization from Xiang JunBo.
     // Three steps BCD. Base 10000 -> base 100 -> base 10.
     // div and mod are evaluated simultaneously as, e.g.
     //   (abcdefgh / 10000) << 32 + (abcdefgh % 10000)
-    //      == abcdefgh + (2^32 - 10000) * (abcdefgh / 10000)))
+    //      == abcdefgh + (2**32 - 10000) * (abcdefgh / 10000)))
     // where the division on the RHS is implemented by the usual multiply + shift
     // trick and the fractional bits are masked away.
-    let abcd_efgh = abcdefgh + (0x100000000 - 10000) * ((abcdefgh * 0x68db8bb) >> 40);
-    let ab_cd_ef_gh = abcd_efgh + (0x10000 - 100) * (((abcd_efgh * 0x147b) >> 19) & 0x7f0000007f);
-    let a_b_c_d_e_f_g_h =
-        ab_cd_ef_gh + (0x100 - 10) * (((ab_cd_ef_gh * 0x67) >> 10) & 0xf000f000f000f);
+    let abcd_efgh =
+        abcdefgh + u64::from(NEG10K) * ((abcdefgh * u64::from(DIV10K_SIG)) >> DIV10K_EXP);
+    let ab_cd_ef_gh = abcd_efgh
+        + u64::from(NEG100) * (((abcd_efgh * u64::from(DIV100_SIG)) >> DIV100_EXP) & 0x7f0000007f);
+    let a_b_c_d_e_f_g_h = ab_cd_ef_gh
+        + u64::from(NEG10)
+            * (((ab_cd_ef_gh * u64::from(DIV10_SIG)) >> DIV10_EXP) & 0xf000f000f000f);
     a_b_c_d_e_f_g_h.to_be()
 }
 
-unsafe fn write_if_nonzero(buffer: *mut u8, digit: u32) -> *mut u8 {
+unsafe fn write_if(buffer: *mut u8, digit: u32, condition: bool) -> *mut u8 {
     unsafe {
         *buffer = b'0' + digit as u8;
-        buffer.add(usize::from(digit != 0))
+        buffer.add(usize::from(condition))
     }
 }
 
@@ -359,29 +474,41 @@ unsafe fn write8(buffer: *mut u8, value: u64) {
     }
 }
 
-const ZEROS: u64 = 0x0101010101010101 * b'0' as u64;
-
 // Writes a significand consisting of up to 17 decimal digits (16-17 for
-// normals) and removes trailing zeros.
+// normals) and removes trailing zeros. The significant digits start from
+// buffer[1]. buffer[0] may contain '0' after this function if the significand
+// has length 16.
 #[cfg_attr(feature = "no-panic", no_panic)]
-unsafe fn write_significand17(mut buffer: *mut u8, value: u64) -> *mut u8 {
+unsafe fn write_significand17(mut buffer: *mut u8, value: u64, has17digits: bool) -> *mut u8 {
     #[cfg(all(target_arch = "aarch64", target_feature = "neon", not(miri)))]
     {
+        // An optimized version for NEON by Dougall Johnson.
+
         use core::arch::aarch64::*;
 
-        // An optimized version for NEON by Dougall Johnson.
-        struct ToStringConstants {
+        const NEG10K: i32 = -10000 + 0x10000;
+
+        struct MulConstants {
             mul_const: u64,
             hundred_million: u64,
-            multipliers32: [i32; 4],
-            multipliers16: [i16; 8],
+            multipliers32: int32x4_t,
+            multipliers16: int16x8_t,
         }
 
-        static CONSTANTS: ToStringConstants = ToStringConstants {
+        static CONSTANTS: MulConstants = MulConstants {
             mul_const: 0xabcc77118461cefd,
             hundred_million: 100000000,
-            multipliers32: [0x68db8bb, -10000 + 0x10000, 0x147b000, -100 + 0x10000],
-            multipliers16: [0xce0, -10 + 0x100, 0, 0, 0, 0, 0, 0],
+            multipliers32: unsafe {
+                mem::transmute::<[i32; 4], int32x4_t>([
+                    DIV10K_SIG as i32,
+                    NEG10K,
+                    (DIV100_SIG << 12) as i32,
+                    NEG100 as i32,
+                ])
+            },
+            multipliers16: unsafe {
+                mem::transmute::<[i16; 8], int16x8_t>([0xce0, NEG10 as i16, 0, 0, 0, 0, 0, 0])
+            },
         };
 
         let mut c = ptr::addr_of!(CONSTANTS);
@@ -401,126 +528,198 @@ unsafe fn write_significand17(mut buffer: *mut u8, value: u64) -> *mut u8 {
         }
 
         // Equivalent to abbccddee = value / 100000000, ffgghhii = value % 100000000.
-        let mut abbccddee = (umul128(value, c.mul_const) >> 90) as u64;
+        let abbccddee = (umul128(value, c.mul_const) >> 90) as u64;
         let ffgghhii = value - abbccddee * hundred_million;
 
         // We could probably make this bit faster, but we're preferring to
         // reuse the constants for now.
         let a = (umul128(abbccddee, c.mul_const) >> 90) as u64;
-        abbccddee -= a * hundred_million;
+        let bbccddee = abbccddee - a * hundred_million;
 
-        buffer = unsafe { write_if_nonzero(buffer, a as u32) };
+        let start = unsafe { buffer.add(1) };
+        buffer = unsafe { write_if(start, a as u32, has17digits) };
 
         unsafe {
-            let hundredmillions64: uint64x1_t =
-                mem::transmute::<u64, uint64x1_t>(abbccddee | (ffgghhii << 32));
-            let hundredmillions32: int32x2_t = vreinterpret_s32_u64(hundredmillions64);
+            let ffgghhii_bbccddee_64: uint64x1_t =
+                mem::transmute::<u64, uint64x1_t>((ffgghhii << 32) | bbccddee);
+            let bbccddee_ffgghhii: int32x2_t = vreinterpret_s32_u64(ffgghhii_bbccddee_64);
 
-            let high_10000: int32x2_t = vreinterpret_s32_u32(vshr_n_u32(
-                vreinterpret_u32_s32(vqdmulh_n_s32(hundredmillions32, c.multipliers32[0])),
+            let bbcc_ffgg: int32x2_t = vreinterpret_s32_u32(vshr_n_u32(
+                vreinterpret_u32_s32(vqdmulh_n_s32(
+                    bbccddee_ffgghhii,
+                    mem::transmute::<int32x4_t, [i32; 4]>(c.multipliers32)[0],
+                )),
                 9,
             ));
-            let tenthousands: int32x2_t =
-                vmla_n_s32(hundredmillions32, high_10000, c.multipliers32[1]);
+            let ddee_bbcc_hhii_ffgg_32: int32x2_t = vmla_n_s32(
+                bbccddee_ffgghhii,
+                bbcc_ffgg,
+                mem::transmute::<int32x4_t, [i32; 4]>(c.multipliers32)[1],
+            );
 
-            let mut extended: int32x4_t =
-                vreinterpretq_s32_u32(vshll_n_u16(vreinterpret_u16_s32(tenthousands), 0));
+            let mut ddee_bbcc_hhii_ffgg: int32x4_t =
+                vreinterpretq_s32_u32(vshll_n_u16(vreinterpret_u16_s32(ddee_bbcc_hhii_ffgg_32), 0));
 
             // Compiler barrier, or clang breaks the subsequent MLA into UADDW +
             // MUL.
-            asm!("/*{:v}*/", inout(vreg) extended);
+            asm!("/*{:v}*/", inout(vreg) ddee_bbcc_hhii_ffgg);
 
-            let high_100: int32x4_t = vqdmulhq_n_s32(extended, c.multipliers32[2]);
-            let hundreds: int16x8_t =
-                vreinterpretq_s16_s32(vmlaq_n_s32(extended, high_100, c.multipliers32[3]));
-            let high_10: int16x8_t = vqdmulhq_n_s16(hundreds, c.multipliers16[0]);
+            let dd_bb_hh_ff: int32x4_t = vqdmulhq_n_s32(
+                ddee_bbcc_hhii_ffgg,
+                mem::transmute::<int32x4_t, [i32; 4]>(c.multipliers32)[2],
+            );
+            let ee_dd_cc_bb_ii_hh_gg_ff: int16x8_t = vreinterpretq_s16_s32(vmlaq_n_s32(
+                ddee_bbcc_hhii_ffgg,
+                dd_bb_hh_ff,
+                mem::transmute::<int32x4_t, [i32; 4]>(c.multipliers32)[3],
+            ));
+            let high_10s: int16x8_t = vqdmulhq_n_s16(
+                ee_dd_cc_bb_ii_hh_gg_ff,
+                mem::transmute::<int16x8_t, [i16; 8]>(c.multipliers16)[0],
+            );
             let digits: uint8x16_t = vrev64q_u8(vreinterpretq_u8_s16(vmlaq_n_s16(
-                hundreds,
-                high_10,
-                c.multipliers16[1],
+                ee_dd_cc_bb_ii_hh_gg_ff,
+                high_10s,
+                mem::transmute::<int16x8_t, [i16; 8]>(c.multipliers16)[1],
             )));
-            let ascii: uint16x8_t = vaddq_u16(
+            let str: uint16x8_t = vaddq_u16(
                 vreinterpretq_u16_u8(digits),
                 vreinterpretq_u16_s8(vdupq_n_s8(b'0' as i8)),
             );
 
-            buffer.cast::<uint16x8_t>().write_unaligned(ascii);
+            buffer.cast::<uint16x8_t>().write_unaligned(str);
 
-            let is_zero: uint16x8_t = vreinterpretq_u16_u8(vceqq_u8(digits, vdupq_n_u8(0)));
-            let zeros: u64 = !vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(is_zero, 4)), 0);
+            let is_not_zero: uint16x8_t =
+                vreinterpretq_u16_u8(vcgtzq_s8(mem::transmute::<uint8x16_t, int8x16_t>(digits)));
+            let zeros: u64 = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(is_not_zero, 4)), 0);
 
             buffer.add(16 - (zeros.leading_zeros() as usize >> 2))
         }
     }
 
-    #[cfg(all(target_arch = "x86_64", target_feature = "sse4.1", not(miri)))]
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2", not(miri)))]
     {
-        use core::arch::x86_64::*;
+        use crate::stdarch_x86::*;
 
-        let abbccddee = (value / 100_000_000) as u32;
-        let ffgghhii = (value % 100_000_000) as u32;
-        let a = abbccddee / 100_000_000;
-        let bbccddee = abbccddee % 100_000_000;
+        let digits_16 = if USE_UMUL128_HI64 {
+            umul128_hi64(value, DIV10_SIG64)
+        } else {
+            value / 10
+        };
+        let last_digit = (value - digits_16 * 10) as u32;
 
-        buffer = unsafe { write_if_nonzero(buffer, a) };
+        // We always write 17 digits into the buffer, but the first one can be
+        // zero. buffer points to the second place in the output buffer to allow
+        // for the insertion of the decimal point, so we can use the first place
+        // as scratch.
+        buffer = unsafe { buffer.add(usize::from(has17digits)) };
         unsafe {
-            // This BCD sequence is by Xiang JunBo. It works the same as the one
-            // in to_bc8 but the masking can be avoided by using vector entries
-            // of the right size, and in the last step a shift operation is
-            // avoided by increasing the shift to 32 bits and then using
-            // ...mulhi... to avoid the shift.
-            let x: __m128i = _mm_set_epi64x(i64::from(ffgghhii), i64::from(bbccddee));
+            *buffer.add(16) = last_digit as u8 + b'0';
+        }
+
+        let abcdefgh = (digits_16 / 100_000_000) as u32;
+        let ijklmnop = (digits_16 % 100_000_000) as u32;
+
+        #[repr(C, align(64))]
+        struct C {
+            div10k: __m128i,
+            neg10k: __m128i,
+            div100: __m128i,
+            div10: __m128i,
+            #[cfg(target_feature = "sse4.1")]
+            neg100: __m128i,
+            #[cfg(target_feature = "sse4.1")]
+            neg10: __m128i,
+            #[cfg(target_feature = "sse4.1")]
+            bswap: __m128i,
+            #[cfg(not(target_feature = "sse4.1"))]
+            hundred: __m128i,
+            #[cfg(not(target_feature = "sse4.1"))]
+            moddiv10: __m128i,
+            zeros: __m128i,
+        }
+
+        static C: C = C {
+            div10k: _mm_set1_epi64x(DIV10K_SIG as i64),
+            neg10k: _mm_set1_epi64x(NEG10K as i64),
+            div100: _mm_set1_epi32(DIV100_SIG as i32),
+            div10: _mm_set1_epi16(((1i32 << 16) / 10 + 1) as i16),
+            #[cfg(target_feature = "sse4.1")]
+            neg100: _mm_set1_epi32(NEG100 as i32),
+            #[cfg(target_feature = "sse4.1")]
+            neg10: _mm_set1_epi16((1 << 8) - 10),
+            #[cfg(target_feature = "sse4.1")]
+            bswap: _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+            #[cfg(not(target_feature = "sse4.1"))]
+            hundred: _mm_set1_epi32(100),
+            #[cfg(not(target_feature = "sse4.1"))]
+            moddiv10: _mm_set1_epi16(10 * (1 << 8) - 1),
+            zeros: _mm_set1_epi64x(ZEROS as i64),
+        };
+
+        // The BCD sequences are based on ones provided by Xiang JunBo.
+        unsafe {
+            let x: __m128i = _mm_set_epi64x(i64::from(abcdefgh), i64::from(ijklmnop));
             let y: __m128i = _mm_add_epi64(
                 x,
                 _mm_mul_epu32(
-                    _mm_set1_epi64x((1 << 32) - 10000),
-                    _mm_srli_epi64(_mm_mul_epu32(x, _mm_set1_epi64x(109951163)), 40),
+                    C.neg10k,
+                    _mm_srli_epi64(_mm_mul_epu32(x, C.div10k), DIV10K_EXP),
                 ),
-            );
-            let z: __m128i = _mm_add_epi64(
-                y,
-                _mm_mullo_epi32(
-                    _mm_set1_epi32((1 << 16) - 100),
-                    _mm_srli_epi32(_mm_mulhi_epu16(y, _mm_set1_epi16(5243)), 3),
-                ),
-            );
-            let big_endian_bcd: __m128i = _mm_add_epi64(
-                z,
-                _mm_mullo_epi16(
-                    _mm_set1_epi16((1 << 8) - 10),
-                    _mm_mulhi_epu16(z, _mm_set1_epi16(6554)),
-                ),
-            );
-            let bcd: __m128i = _mm_shuffle_epi8(
-                big_endian_bcd,
-                _mm_set_epi8(8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7),
             );
 
-            // convert to ascii
-            let ascii0: __m128i = _mm_set1_epi8(b'0' as i8);
-            let digits = _mm_add_epi8(bcd, ascii0);
+            #[cfg(target_feature = "sse4.1")]
+            let bcd: __m128i = {
+                // _mm_mullo_epi32 is SSE 4.1
+                let z: __m128i = _mm_add_epi64(
+                    y,
+                    _mm_mullo_epi32(C.neg100, _mm_srli_epi32(_mm_mulhi_epu16(y, C.div100), 3)),
+                );
+                let big_endian_bcd: __m128i =
+                    _mm_add_epi64(z, _mm_mullo_epi16(C.neg10, _mm_mulhi_epu16(z, C.div10)));
+                // SSSE3
+                _mm_shuffle_epi8(big_endian_bcd, C.bswap)
+            };
+
+            #[cfg(not(target_feature = "sse4.1"))]
+            let bcd: __m128i = {
+                let y_div_100: __m128i = _mm_srli_epi16(_mm_mulhi_epu16(y, C.div100), 3);
+                let y_mod_100: __m128i = _mm_sub_epi16(y, _mm_mullo_epi16(y_div_100, C.hundred));
+                let z: __m128i = _mm_or_si128(_mm_slli_epi32(y_mod_100, 16), y_div_100);
+                let bcd_shuffled: __m128i = _mm_sub_epi16(
+                    _mm_slli_epi16(z, 8),
+                    _mm_mullo_epi16(C.moddiv10, _mm_mulhi_epu16(z, C.div10)),
+                );
+                _mm_shuffle_epi32(bcd_shuffled, _MM_SHUFFLE(0, 1, 2, 3))
+            };
+
+            let digits = _mm_or_si128(bcd, C.zeros);
 
             // determine number of leading zeros
-            let mask: u16 = !_mm_movemask_epi8(_mm_cmpeq_epi8(bcd, _mm_setzero_si128())) as u16;
-            let len = 64 - u64::from(mask).leading_zeros();
+            let mask128: __m128i = _mm_cmpgt_epi8(bcd, _mm_setzero_si128());
+            let mask = _mm_movemask_epi8(mask128) as u16;
+            // We don't need a zero-check here: if the mask were zero, either
+            // the significand is zero which is handled elsewhere or the only
+            // non-zero digit is the last digit which we factored off. But in
+            // that case the number would be printed with a different exponent
+            // that shifts the last digit into the first position.
+            let len = 32 - u32::from(mask).leading_zeros() as usize;
 
-            // and save result
             _mm_storeu_si128(buffer.cast::<__m128i>(), digits);
-
-            buffer.add(len as usize)
+            buffer.add(if last_digit != 0 { 17 } else { len })
         }
     }
 
     #[cfg(not(any(
         all(target_arch = "aarch64", target_feature = "neon", not(miri)),
-        all(target_arch = "x86_64", target_feature = "sse4.1", not(miri)),
+        all(target_arch = "x86_64", target_feature = "sse2", not(miri)),
     )))]
     {
-        // Each digits is denoted by a letter so value is abbccddeeffgghhii where
-        // digit a can be zero.
+        let start = unsafe { buffer.add(1) };
+        // Each digits is denoted by a letter so value is abbccddeeffgghhii.
         let abbccddee = (value / 100_000_000) as u32;
         let ffgghhii = (value % 100_000_000) as u32;
-        buffer = unsafe { write_if_nonzero(buffer, abbccddee / 100_000_000) };
+        buffer = unsafe { write_if(start, abbccddee / 100_000_000, has17digits) };
         let bcd = to_bcd8(u64::from(abbccddee % 100_000_000));
         unsafe {
             write8(buffer, bcd | ZEROS);
@@ -539,53 +738,13 @@ unsafe fn write_significand17(mut buffer: *mut u8, value: u64) -> *mut u8 {
 // Writes a significand consisting of up to 9 decimal digits (8-9 for normals)
 // and removes trailing zeros.
 #[cfg_attr(feature = "no-panic", no_panic)]
-unsafe fn write_significand9(mut buffer: *mut u8, value: u32) -> *mut u8 {
-    buffer = unsafe { write_if_nonzero(buffer, value / 100_000_000) };
+unsafe fn write_significand9(mut buffer: *mut u8, value: u32, has9digits: bool) -> *mut u8 {
+    buffer = unsafe { write_if(buffer, value / 100_000_000, has9digits) };
     let bcd = to_bcd8(u64::from(value % 100_000_000));
     unsafe {
         write8(buffer, bcd | ZEROS);
         buffer.add(count_trailing_nonzeros(bcd))
     }
-}
-
-// Computes the decimal exponent as floor(log10(2**bin_exp)) if regular or
-// floor(log10(3/4 * 2**bin_exp)) otherwise, without branching.
-const fn compute_dec_exp(bin_exp: i32, regular: bool) -> i32 {
-    debug_assert!(bin_exp >= -1334 && bin_exp <= 2620);
-    // log10_3_over_4_sig = -log10(3/4) * 2**log10_2_exp rounded to a power of 2
-    const LOG10_3_OVER_4_SIG: i32 = 131_072;
-    // log10_2_sig = round(log10(2) * 2**log10_2_exp)
-    const LOG10_2_SIG: i32 = 315_653;
-    const LOG10_2_EXP: i32 = 20;
-    (bin_exp * LOG10_2_SIG - !regular as i32 * LOG10_3_OVER_4_SIG) >> LOG10_2_EXP
-}
-
-// Computes a shift so that, after scaling by a power of 10, the intermediate
-// result always has a fixed 128-bit fractional part (for double).
-//
-// Different binary exponents can map to the same decimal exponent, but place
-// the decimal point at different bit positions. The shift compensates for this.
-//
-// For example, both 3 * 2**59 and 3 * 2**60 have dec_exp = 2, but dividing by
-// 10^dec_exp puts the decimal point in different bit positions:
-//   3 * 2**59 / 100 = 1.72...e+16  (needs shift = 1 + 1)
-//   3 * 2**60 / 100 = 3.45...e+16  (needs shift = 2 + 1)
-const fn compute_exp_shift(bin_exp: i32, dec_exp: i32) -> i32 {
-    debug_assert!(dec_exp >= -350 && dec_exp <= 350);
-    // log2_pow10_sig = round(log2(10) * 2**log2_pow10_exp) + 1
-    const LOG2_POW10_SIG: i32 = 217_707;
-    const LOG2_POW10_EXP: i32 = 16;
-    // pow10_bin_exp = floor(log2(10**-dec_exp))
-    let pow10_bin_exp = (-dec_exp * LOG2_POW10_SIG) >> LOG2_POW10_EXP;
-    // pow10 = ((pow10_hi << 64) | pow10_lo) * 2**(pow10_bin_exp - 127)
-
-    // Shift to ensure the intermediate result of multiplying by a power of 10
-    // has a fixed 128-bit fractional part. For example, 3 * 2**59 and 3 * 2**60
-    // both have dec_exp = 2 and dividing them by 10**dec_exp would have the
-    // decimal point in different (bit) positions without the shift:
-    //   3 * 2**59 / 100 = 1.72...e+16 (exp_shift = 1 + 1)
-    //   3 * 2**60 / 100 = 3.45...e+16 (exp_shift = 2 + 1)
-    bin_exp + pow10_bin_exp + 1
 }
 
 fn normalize<UInt>(mut dec: dec_fp, subnormal: bool) -> dec_fp
@@ -610,28 +769,29 @@ where
 }
 
 // Converts a binary FP number bin_sig * 2**bin_exp to the shortest decimal
-// representation.
+// representation, where bin_exp = raw_exp - num_sig_bits - exp_bias.
 #[cfg_attr(feature = "no-panic", no_panic)]
-fn to_decimal<UInt>(
-    bin_sig: UInt,
-    bin_exp: i32,
-    mut dec_exp: i32,
-    regular: bool,
-    subnormal: bool,
-) -> dec_fp
+fn to_decimal<Float, UInt>(bin_sig: UInt, raw_exp: i64, regular: bool, subnormal: bool) -> dec_fp
 where
+    Float: FloatTraits,
     UInt: traits::UInt,
 {
+    let mut bin_exp = raw_exp - i64::from(Float::NUM_SIG_BITS) - i64::from(Float::EXP_BIAS);
     let num_bits = mem::size_of::<UInt>() as i32 * 8;
     // An optimization from yy by Yaoyuan Guo:
     while regular && !subnormal {
-        let exp_shift = compute_exp_shift(bin_exp, dec_exp);
+        let dec_exp = if USE_UMUL128_HI64 {
+            umul128_hi64(bin_exp as u64, 0x4d10500000000000) as i32
+        } else {
+            compute_dec_exp(bin_exp as i32, true)
+        };
+        let exp_shift = unsafe { compute_exp_shift::<UInt, true>(bin_exp as i32, dec_exp) };
         let pow10 = unsafe { POW10_SIGNIFICANDS.get_unchecked(-dec_exp) };
 
         let integral; // integral part of bin_sig * pow10
         let fractional; // fractional part of bin_sig * pow10
         if num_bits == 64 {
-            let p = umul192_upper128(pow10.hi, pow10.lo, (bin_sig << exp_shift).into());
+            let p = umul192_hi128(pow10.hi, pow10.lo, (bin_sig << exp_shift).into());
             integral = UInt::truncate(p.hi);
             fractional = p.lo;
         } else {
@@ -642,7 +802,8 @@ where
         const HALF_ULP: u64 = 1 << 63;
 
         // Exact half-ulp tie when rounding to nearest integer.
-        if fractional == HALF_ULP {
+        let cmp = fractional.wrapping_sub(HALF_ULP) as i64;
+        if cmp == 0 {
             break;
         }
 
@@ -650,10 +811,10 @@ where
         let digit = {
             // An optimization of integral % 10 by Dougall Johnson. Relies on
             // range calculation: (max_bin_sig << max_exp_shift) * max_u128.
-            let quo10 = ((u128::from(integral.into()) * ((1 << 64) / 10 + 1)) >> 64) as u64;
-            let mut digit = integral.into() - quo10 * 10;
+            let mut digit = integral.into() - umul128_hi64(integral.into(), DIV10_SIG64) * 10;
+            // or it narrows to 32-bit and doesn't use madd/msub
             unsafe {
-                asm!("/*{0}*/", inout(reg) digit); // or it narrows to 32-bit and doesn't use madd/msub
+                asm!("/*{0}*/", inout(reg) digit);
             }
             digit
         };
@@ -695,30 +856,39 @@ where
         // s - shorter underestimate, S - shorter overestimate
         // l - longer underestimate,  L - longer overestimate
 
-        if {
-            // Boundary case when rounding down to nearest 10.
-            scaled_sig_mod10 != scaled_half_ulp &&
-            // Near-boundary case when rounding up to nearest 10.
-            // Case where upper != ten is insufficient: 1.342178e+08f.
-            ten.wrapping_sub(upper) > 1 // upper != ten && upper != ten - 1
-        } {
-            let round_up = upper >= ten;
-            let shorter = (integral.into() - digit + u64::from(round_up) * 10) as i64;
-            let longer = (integral.into() + u64::from(fractional >= HALF_ULP)) as i64;
-            let use_shorter = scaled_sig_mod10 <= scaled_half_ulp || round_up;
+        // Check for boundary case when rounding down to nearest 10 and
+        // near-boundary case when rounding up to nearest 10.
+        if scaled_sig_mod10 == scaled_half_ulp
+            // Case where upper == ten is insufficient: 1.342178e+08f.
+            // upper == ten || upper == ten - 1
+            || ten.wrapping_sub(upper) <= 1
+        {
+            break;
+        }
+
+        let round_up = upper >= ten;
+        let mut shorter = (integral.into() - digit) as i64;
+        let longer = (integral.into() + u64::from(cmp >= 0)) as i64;
+        if cfg!(target_arch = "aarch64") {
+            // Faster version without ccmp.
+            let dec_sig =
+                hint::select_unpredictable(scaled_sig_mod10 < scaled_half_ulp, shorter, longer);
             return dec_fp {
-                #[cfg(zmij_no_select_unpredictable)]
-                sig: if use_shorter { shorter } else { longer },
-                #[cfg(not(zmij_no_select_unpredictable))]
-                sig: hint::select_unpredictable(use_shorter, shorter, longer),
+                sig: hint::select_unpredictable(round_up, shorter + 10, dec_sig),
                 exp: dec_exp,
             };
         }
-        break;
+        shorter += i64::from(round_up) * 10;
+        let use_shorter = scaled_sig_mod10 <= scaled_half_ulp || round_up;
+        return dec_fp {
+            sig: hint::select_unpredictable(use_shorter, shorter, longer),
+            exp: dec_exp,
+        };
     }
+    bin_exp += i64::from(subnormal);
 
-    dec_exp = compute_dec_exp(bin_exp, regular);
-    let exp_shift = compute_exp_shift(bin_exp, dec_exp);
+    let dec_exp = compute_dec_exp(bin_exp as i32, regular);
+    let exp_shift = unsafe { compute_exp_shift::<UInt, false>(bin_exp as i32, dec_exp) };
     let mut pow10 = unsafe { POW10_SIGNIFICANDS.get_unchecked(-dec_exp) };
 
     // Fallback to Schubfach to guarantee correctness in boundary cases. This
@@ -737,9 +907,9 @@ where
     // by multiplying them by the power of 10 and applying modified rounding.
     let lsb = bin_sig & UInt::from(1);
     let lower = (bin_sig_shifted - (UInt::from(regular) + UInt::from(1))) << exp_shift;
-    let lower = umul_upper_inexact_to_odd(pow10.hi, pow10.lo, lower) + lsb;
+    let lower = umulhi_inexact_to_odd(pow10.hi, pow10.lo, lower) + lsb;
     let upper = (bin_sig_shifted + UInt::from(2)) << exp_shift;
-    let upper = umul_upper_inexact_to_odd(pow10.hi, pow10.lo, upper) - lsb;
+    let upper = umulhi_inexact_to_odd(pow10.hi, pow10.lo, upper) - lsb;
 
     // The idea of using a single shorter candidate is by Cassio Neri.
     // It is less or equal to the upper bound by construction.
@@ -754,7 +924,7 @@ where
         );
     }
 
-    let scaled_sig = umul_upper_inexact_to_odd(pow10.hi, pow10.lo, bin_sig_shifted << exp_shift);
+    let scaled_sig = umulhi_inexact_to_odd(pow10.hi, pow10.lo, bin_sig_shifted << exp_shift);
     let longer_below = scaled_sig >> BOUND_SHIFT;
     let longer_above = longer_below + UInt::from(1);
 
@@ -788,20 +958,18 @@ where
     Float: FloatTraits,
 {
     let bits = value.to_bits();
-    let raw_exp = Float::get_exp(bits); // binary exponent
-    let mut bin_exp = raw_exp - Float::NUM_SIG_BITS - Float::EXP_BIAS;
-    // Compute the decimal exponent early to overlap its latency with other work.
-    let mut dec_exp = compute_dec_exp(bin_exp, true);
+    // It is beneficial to extract exponent and significand early.
+    let bin_exp = Float::get_exp(bits); // binary exponent
+    let mut bin_sig = Float::get_sig(bits); // binary significand
 
     unsafe {
         *buffer = b'-';
     }
     buffer = unsafe { buffer.add(usize::from(Float::is_negative(bits))) };
 
-    let mut bin_sig = Float::get_sig(bits); // binary significand
-    let mut regular = bin_sig != Float::SigType::from(0);
-    let special = raw_exp == 0;
-    if special {
+    let regular = bin_sig != Float::SigType::from(0);
+    let subnormal = bin_exp == 0;
+    if bin_exp == 0 {
         if bin_sig == Float::SigType::from(0) {
             return unsafe {
                 *buffer = b'0';
@@ -810,28 +978,27 @@ where
                 buffer.add(3)
             };
         }
-        bin_exp = 1 - Float::NUM_SIG_BITS - Float::EXP_BIAS;
         bin_sig |= Float::IMPLICIT_BIT;
-        // Setting regular is not redundant: it has a measurable perf impact.
-        regular = true;
     }
     bin_sig ^= Float::IMPLICIT_BIT;
 
     // Here be 🐉s.
-    let mut dec = to_decimal(bin_sig, bin_exp, dec_exp, regular, special);
-    dec_exp = dec.exp;
+    let mut dec = to_decimal::<Float, Float::SigType>(bin_sig, bin_exp, regular, subnormal);
+    let mut dec_exp = dec.exp;
 
     // Write significand.
     let end = if Float::NUM_BITS == 64 {
-        dec_exp += Float::MAX_DIGITS10 as i32 + i32::from(dec.sig >= 10_000_000_000_000_000) - 2;
-        unsafe { write_significand17(buffer.add(1), dec.sig as u64) }
+        let has17digits = dec.sig >= 10_000_000_000_000_000;
+        dec_exp += Float::MAX_DIGITS10 as i32 - 2 + i32::from(has17digits);
+        unsafe { write_significand17(buffer, dec.sig as u64, has17digits) }
     } else {
         if dec.sig < 10_000_000 {
             dec.sig *= 10;
             dec_exp -= 1;
         }
-        dec_exp += Float::MAX_DIGITS10 as i32 + i32::from(dec.sig >= 100_000_000) - 2;
-        unsafe { write_significand9(buffer.add(1), dec.sig as u32) }
+        let has9digits = dec.sig >= 100_000_000;
+        dec_exp += Float::MAX_DIGITS10 as i32 - 2 + i32::from(has9digits);
+        unsafe { write_significand9(buffer.add(1), dec.sig as u32, has9digits) }
     };
 
     let length = unsafe { end.offset_from(buffer.add(1)) } as usize;
@@ -880,8 +1047,7 @@ where
         (u16::from(b'-') << 8) | u16::from(b'e')
     };
     buffer = unsafe { buffer.add(1) };
-    let mask = i32::from(dec_exp >= 0) - 1;
-    dec_exp = (dec_exp + mask) ^ mask; // absolute value
+    dec_exp = if dec_exp >= 0 { dec_exp } else { -dec_exp };
     buffer = unsafe { buffer.add(usize::from(dec_exp >= 10)) };
     if Float::MIN_10_EXP >= -99 && Float::MAX_10_EXP <= 99 {
         unsafe {
@@ -892,10 +1058,13 @@ where
             return buffer.add(2);
         }
     }
-    // 19 is faster or equal to 12 even for 3 digits.
-    const DIV_EXP: u32 = 19;
-    const DIV_SIG: u32 = (1 << DIV_EXP) / 100 + 1;
-    let digit = (dec_exp as u32 * DIV_SIG) >> DIV_EXP; // value / 100
+
+    // digit = dec_exp / 100
+    let digit = if USE_UMUL128_HI64 {
+        umul128_hi64(dec_exp as u64, 0x290000000000000) as u32
+    } else {
+        (dec_exp as u32 * DIV100_SIG) >> DIV100_EXP
+    };
     unsafe {
         *buffer = b'0' + digit as u8;
     }

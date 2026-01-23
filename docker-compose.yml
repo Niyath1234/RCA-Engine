@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  backend:
+    build: .
+    container_name: rca-backend
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./ui
+    container_name: rca-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://backend:8080

@@ -1,7 +1,7 @@
 [package]
 name = "comfy-table"
 description = "An easy to use library for building beautiful tables with automatic content wrapping"
-version = "7.2.1"
+version = "7.2.2"
 authors = ["Arne Beer <contact@arne.beer>"]
 homepage = "https://github.com/nukesor/comfy-table"
 repository = "https://github.com/nukesor/comfy-table"
@@ -9,7 +9,6 @@ documentation = "https://docs.rs/comfy-table/"
 license = "MIT"
 keywords = ["table", "terminal", "unicode"]
 readme = "README.md"
-rust-version = "1.85"
 edition = "2024"
 
 [badges]
@@ -61,7 +60,7 @@ ansi-str = { version = "0.9", optional = true }
 console = { version = "0.16", optional = true }
 
 [dev-dependencies]
-criterion = "0.7"
+criterion = "0.8"
 pretty_assertions = "1"
 proptest = "1"
 rand = "0.9"
