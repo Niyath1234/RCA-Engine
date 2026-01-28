@@ -3,6 +3,7 @@ Cargo.lock
 !vendor/**/Cargo.lock
 *.log
 .env
+.env.bak
 data/*.parquet
 !data/.gitkeep
 
