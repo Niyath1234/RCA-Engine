@@ -1,0 +1,58 @@
+# Rust Components Dockerfile
+# Builds Rust binaries for RCA Engine
+
+FROM rust:1.75-slim as builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Cargo files
+COPY Cargo.toml Cargo.lock ./
+
+# Copy vendor directory if it exists (for offline builds)
+COPY vendor ./vendor
+
+# Copy source code
+COPY src ./src
+COPY Hypergraph ./Hypergraph
+COPY KnowledgeBase ./KnowledgeBase
+COPY WorldState ./WorldState
+
+# Build release binaries
+RUN cargo build --release --bin server --bin node_registry_server --bin migrate_metadata
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash rustuser
+
+# Copy binaries from builder
+COPY --from=builder /app/target/release/server /usr/local/bin/rca-server
+COPY --from=builder /app/target/release/node_registry_server /usr/local/bin/node-registry-server
+COPY --from=builder /app/target/release/migrate_metadata /usr/local/bin/migrate-metadata
+
+# Copy application data directories
+COPY --chown=rustuser:rustuser metadata ./metadata
+COPY --chown=rustuser:rustuser data ./data
+COPY --chown=rustuser:rustuser config ./config
+
+USER rustuser
+
+EXPOSE 8082
+
+CMD ["rca-server"]

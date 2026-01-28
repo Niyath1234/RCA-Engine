@@ -1,0 +1,34 @@
+# Docker Compose Override for Development
+# Copy this file to docker-compose.dev.yml and customize as needed
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: "3.8"
+
+services:
+  backend:
+    # Mount source code for hot reload
+    volumes:
+      - ./backend:/app:rw
+    environment:
+      - RCA_DEBUG=true
+      - RCA_LOG_LEVEL=debug
+    # Override command for development
+    command: ["python", "app_production.py"]
+
+  frontend:
+    # Mount source for hot reload (if using Vite dev server)
+    volumes:
+      - ./ui:/app:rw
+      - /app/node_modules
+    # Use dev server instead of nginx
+    # Uncomment to use Vite dev server
+    # command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
+  postgres:
+    # Expose more ports for direct access
+    ports:
+      - "5432:5432"
+      - "5433:5432"  # Alternative port
+
+  # Add development-only services here
+  # Example: pgadmin, mailhog, etc.
