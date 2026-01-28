@@ -68,14 +68,7 @@ impl RcaEngine {
         println!("   ✅ LLM Interpretation:");
         println!("      - System A: {} (confidence: {:.2}%)", interpretation.system_a, interpretation.confidence * 100.0);
         println!("      - System B: {} (confidence: {:.2}%)", interpretation.system_b, interpretation.confidence * 100.0);
-        if interpretation.is_cross_metric {
-            println!("      - Metric A: {:?}", interpretation.metric_a);
-            println!("      - Metric B: {:?}", interpretation.metric_b);
-            println!("      - Type: Cross-metric comparison");
-        } else {
-            println!("      - Metric: {:?}", interpretation.metric);
-            println!("      - Type: Same-metric comparison");
-        }
+        println!("      - Metric: {}", interpretation.metric);
         if let Some(ref date) = interpretation.as_of_date {
             println!("      - As-of Date: {}", date);
         }
@@ -84,16 +77,20 @@ impl RcaEngine {
         // Step 2: Resolve ambiguities (max 3 questions)
         println!("🔍 STEP 2: AMBIGUITY RESOLUTION");
         let ambiguity_resolver = AmbiguityResolver::new(self.metadata.clone());
-        // Pass None for world_state - will be added when WorldState is available in RcaEngine
         let resolved = ambiguity_resolver.resolve(&interpretation, None)?;
         println!("   ✅ Ambiguity Resolution Complete");
         println!("      - Final System A: {}", resolved.system_a);
         println!("      - Final System B: {}", resolved.system_b);
+        if let Some(ref metric) = resolved.metric {
+            println!("      - Final Metric: {}", metric);
+        }
         if resolved.is_cross_metric {
-            println!("      - Final Metric A: {:?}", resolved.metric_a);
-            println!("      - Final Metric B: {:?}", resolved.metric_b);
-        } else {
-            println!("      - Final Metric: {:?}", resolved.metric);
+            if let Some(ref metric_a) = resolved.metric_a {
+                println!("      - Metric A: {}", metric_a);
+            }
+            if let Some(ref metric_b) = resolved.metric_b {
+                println!("      - Metric B: {}", metric_b);
+            }
         }
         println!("\n{}\n", "-".repeat(80));
         
@@ -103,32 +100,16 @@ impl RcaEngine {
         println!("   - Total nodes (tables) in graph: {}", self.metadata.tables.len());
         
         let graph = Hypergraph::new(self.metadata.clone());
-        
-        // Handle cross-metric vs same-metric
-        let subgraph = if resolved.is_cross_metric {
-            // Cross-metric: get subgraph for each metric separately
-            let metric_a = resolved.metric_a.as_ref().ok_or_else(|| 
-                RcaError::Execution("Cross-metric comparison requires metric_a".to_string()))?;
-            let metric_b = resolved.metric_b.as_ref().ok_or_else(|| 
-                RcaError::Execution("Cross-metric comparison requires metric_b".to_string()))?;
-            
-            // Get subgraph for metric_a in system_a and metric_b in system_b
-            graph.get_reconciliation_subgraph_cross_metric(
-                &resolved.system_a,
-                &resolved.system_b,
-                metric_a,
-                metric_b,
-            )?
+        let metric_name = if resolved.is_cross_metric {
+            resolved.metric_a.as_ref().or(resolved.metric_b.as_ref()).map(|s| s.as_str()).unwrap_or("")
         } else {
-            // Same-metric: use existing logic
-            let metric = resolved.metric.as_ref().ok_or_else(|| 
-                RcaError::Execution("Same-metric comparison requires metric".to_string()))?;
-            graph.get_reconciliation_subgraph(
-                &resolved.system_a,
-                &resolved.system_b,
-                metric,
-            )?
+            resolved.metric.as_ref().map(|s| s.as_str()).unwrap_or("")
         };
+        let subgraph = graph.get_reconciliation_subgraph(
+            &resolved.system_a,
+            &resolved.system_b,
+            metric_name,
+        )?;
         
         println!("   ✅ Subgraph Extracted:");
         println!("      - System A Tables: {} ({:?})", subgraph.tables_a.len(), subgraph.tables_a);
@@ -176,8 +157,7 @@ impl RcaEngine {
         
         // Step 5: Get metric metadata
         println!("📏 STEP 5: METRIC METADATA");
-        let metric_name = resolved.metric.as_ref()
-            .ok_or_else(|| RcaError::Execution("Metric not specified in resolved interpretation".to_string()))?;
+        let metric_name = resolved.metric.as_ref().ok_or_else(|| RcaError::Execution("Metric not found in resolved interpretation".to_string()))?;
         let metric = self.metadata
             .get_metric(metric_name)
             .ok_or_else(|| RcaError::Execution(format!("Metric not found: {}", metric_name)))?;
@@ -412,12 +392,10 @@ impl RcaEngine {
         
         // Step 9.5: LLM Tool Selection (NEW)
         println!("🔧 STEP 9.5: LLM TOOL SELECTION");
-        let metric_name = resolved.metric.as_ref()
-            .ok_or_else(|| RcaError::Execution("Metric not specified in resolved interpretation".to_string()))?;
         let execution_context = ExecutionContext {
             system_a: resolved.system_a.clone(),
             system_b: resolved.system_b.clone(),
-            metric: metric_name.clone(),
+            metric: resolved.metric.clone().unwrap_or_default(),
             grain_columns: common_grain.clone(),
             available_tables: subgraph.tables_a.iter().chain(subgraph.tables_b.iter())
                 .map(|t| t.clone())
@@ -451,8 +429,7 @@ impl RcaEngine {
         ).await?;
         
         // Execute DE tools before comparison if requested
-        let metric_name = resolved.metric.as_ref()
-            .ok_or_else(|| RcaError::Execution("Metric not specified in resolved interpretation".to_string()))?;
+        let metric_name = resolved.metric.as_ref().ok_or_else(|| RcaError::Execution("Metric not found in resolved interpretation".to_string()))?;
         self.execute_de_tools_before_comparison(
             &df_a_enriched,
             &df_b_enriched,
@@ -491,8 +468,6 @@ impl RcaEngine {
             }
         };
         
-        let metric_name = resolved.metric.as_ref()
-            .ok_or_else(|| RcaError::Execution("Metric not specified in resolved interpretation".to_string()))?;
         let comparison = diff_engine.compare(
             df_a_enriched,
             df_b_enriched,
@@ -533,14 +508,14 @@ impl RcaEngine {
                 let mut key = Vec::new();
                 for col_name in &common_grain {
                     if let Ok(col_val) = mismatch_df.column(col_name) {
-                        let val_str = match col_val.dtype() {
-                            DataType::String => {
+                        let val_str: String = match col_val.dtype() {
+                            &DataType::String => {
                                 col_val.str().unwrap().get(row_idx).unwrap_or("").to_string()
                             }
-                            DataType::Int64 => {
+                            &DataType::Int64 => {
                                 col_val.i64().unwrap().get(row_idx).unwrap_or(0).to_string()
                             }
-                            DataType::Float64 => {
+                            &DataType::Float64 => {
                                 col_val.f64().unwrap().get(row_idx).unwrap_or(0.0).to_string()
                             }
                             _ => format!("{:?}", col_val.get(row_idx)),

@@ -34,8 +34,8 @@ impl AmbiguityResolver {
                 interpretation.metric_b.as_ref().map(|s| s.as_str()).unwrap_or("")
             )
         } else {
-            let metric = interpretation.metric.as_ref().map(|s| s.as_str()).unwrap_or("");
-            (metric, metric)
+            let metric = &interpretation.metric;
+            (metric.as_str(), metric.as_str())
         };
         
         // Check if metrics are similar via contract column descriptions or table metadata
@@ -126,7 +126,7 @@ impl AmbiguityResolver {
             (Some(metric_a.to_string()), None, None)
         } else {
             // Cross-metric mode: keep both metrics
-            (interpretation.metric.clone(), interpretation.metric_a.clone(), interpretation.metric_b.clone())
+            (Some(interpretation.metric.clone()), interpretation.metric_a.clone(), interpretation.metric_b.clone())
         };
         
         Ok(ResolvedInterpretation {

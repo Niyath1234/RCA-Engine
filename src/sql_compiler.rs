@@ -372,7 +372,7 @@ impl SqlCompiler {
                 let val = value.as_ref().ok_or_else(|| {
                     RcaError::Execution(format!("Operator {} requires a value", operator))
                 })?;
-                let val_str = self.format_value(val)?;
+                let val_str = self.format_value(val);
                 // For string equality, make case-insensitive
                 if op == "=" && val.is_string() {
                     Ok(format!("UPPER({}) = UPPER({})", column, val_str))
@@ -387,7 +387,7 @@ impl SqlCompiler {
                 if let Some(arr) = val.as_array() {
                     let vals: Vec<String> = arr.iter()
                         .map(|v| self.format_value(v))
-                        .collect::<Result<Vec<_>>>()?;
+                        .collect();
                     Ok(format!("{} IN ({})", column, vals.join(", ")))
                 } else {
                     Err(RcaError::Execution("IN operator requires an array value".to_string()))
@@ -400,7 +400,7 @@ impl SqlCompiler {
                 if let Some(arr) = val.as_array() {
                     let vals: Vec<String> = arr.iter()
                         .map(|v| self.format_value(v))
-                        .collect::<Result<Vec<_>>>()?;
+                        .collect();
                     Ok(format!("{} NOT IN ({})", column, vals.join(", ")))
                 } else {
                     Err(RcaError::Execution("NOT IN operator requires an array value".to_string()))
@@ -410,22 +410,11 @@ impl SqlCompiler {
                 let val = value.as_ref().ok_or_else(|| {
                     RcaError::Execution("LIKE operator requires a value".to_string())
                 })?;
-                let val_str = self.format_value(val)?;
+                let val_str = self.format_value(val);
                 // Make LIKE case-insensitive by default
                 Ok(format!("UPPER({}) LIKE UPPER({})", column, val_str))
             }
             _ => Err(RcaError::Execution(format!("Unknown operator: {}", operator))),
-        }
-    }
-    
-    /// Format value for SQL
-    fn format_value(&self, value: &serde_json::Value) -> Result<String> {
-        match value {
-            serde_json::Value::String(s) => Ok(format!("'{}'", s.replace("'", "''"))),
-            serde_json::Value::Number(n) => Ok(n.to_string()),
-            serde_json::Value::Bool(b) => Ok(b.to_string().to_uppercase()),
-            serde_json::Value::Null => Ok("NULL".to_string()),
-            _ => Err(RcaError::Execution(format!("Unsupported value type: {:?}", value))),
         }
     }
     

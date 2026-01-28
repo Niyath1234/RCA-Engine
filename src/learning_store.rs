@@ -241,7 +241,7 @@ impl LearningStore {
         info!("Migrating {} corrections from JSON to SQLite...", corrections.len());
         
         // Insert into database
-        let db = self.db.lock().unwrap();
+        let mut db = self.db.lock().unwrap();
         let tx = db.transaction()
             .map_err(|e| RcaError::Execution(format!("Failed to start transaction: {}", e)))?;
         
@@ -435,16 +435,19 @@ impl LearningStore {
     /// Get all corrections (from database)
     pub fn get_all_corrections(&self) -> Vec<LearnedCorrection> {
         let db = self.db.lock().unwrap();
-        let mut stmt = db.prepare(
+        let mut stmt = match db.prepare(
             r#"
             SELECT incorrect_name, correct_name, correction_type, table_name, 
                    learned_at, usage_count, approved_by
             FROM learned_corrections
             ORDER BY usage_count DESC, learned_at DESC
             "#
-        ).ok()?;
+        ) {
+            Ok(stmt) => stmt,
+            Err(_) => return Vec::new(),
+        };
         
-        let corrections = stmt.query_map([], |row| {
+        let corrections = match stmt.query_map([], |row| {
             Ok(LearnedCorrection {
                 incorrect_name: row.get(0)?,
                 correct_name: row.get(1)?,
@@ -454,7 +457,10 @@ impl LearningStore {
                 usage_count: row.get(5)?,
                 approved_by: row.get(6)?,
             })
-        }).ok()?;
+        }) {
+            Ok(corrections) => corrections,
+            Err(_) => return Vec::new(),
+        };
         
         corrections.filter_map(|c| c.ok()).collect()
     }
@@ -462,7 +468,7 @@ impl LearningStore {
     /// Get corrections by type
     pub fn get_corrections_by_type(&self, correction_type: &str) -> Vec<LearnedCorrection> {
         let db = self.db.lock().unwrap();
-        let mut stmt = db.prepare(
+        let mut stmt = match db.prepare(
             r#"
             SELECT incorrect_name, correct_name, correction_type, table_name, 
                    learned_at, usage_count, approved_by
@@ -470,9 +476,12 @@ impl LearningStore {
             WHERE correction_type = ?1
             ORDER BY usage_count DESC, learned_at DESC
             "#
-        ).ok()?;
+        ) {
+            Ok(stmt) => stmt,
+            Err(_) => return Vec::new(),
+        };
         
-        let corrections = stmt.query_map(params![correction_type], |row| {
+        let corrections = match stmt.query_map(params![correction_type], |row| {
             Ok(LearnedCorrection {
                 incorrect_name: row.get(0)?,
                 correct_name: row.get(1)?,
@@ -482,7 +491,10 @@ impl LearningStore {
                 usage_count: row.get(5)?,
                 approved_by: row.get(6)?,
             })
-        }).ok()?;
+        }) {
+            Ok(corrections) => corrections,
+            Err(_) => return Vec::new(),
+        };
         
         corrections.filter_map(|c| c.ok()).collect()
     }

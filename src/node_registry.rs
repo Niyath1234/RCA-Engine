@@ -204,7 +204,6 @@ pub struct NodeRegistry {
     segment_counters: HashMap<ReservedSegment, u64>,
     
     /// Optimized search engine for fast text search
-    #[serde(skip)]
     search_engine: Arc<Mutex<OptimizedSearch>>,
 }
 

@@ -1409,7 +1409,7 @@ async fn upload_csv(
         name: table_name.clone(),
         entity: entity_name.to_string(),
         primary_key: primary_keys.clone(),
-        time_column: String::new(), // Can be added later if needed
+        time_column: None, // Can be added later if needed
         system: system_name.to_string(),
         path: format!("{}.parquet", table_name),
         columns: Some(headers.iter().map(|col| {

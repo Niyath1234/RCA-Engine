@@ -2,7 +2,7 @@
 
 use crate::metadata::*;
 use crate::error::{RcaError, Result};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 
 pub struct MetadataRepository {
@@ -77,8 +77,8 @@ impl MetadataRepository {
         // Create identity object
         let identity = IdentityObject {
             canonical_keys: identity_mappings.iter().map(|im| CanonicalKey {
-                entity: im.entity_id.clone().unwrap_or_default(),
-                canonical: im.canonical_key.clone().unwrap_or_default(),
+                entity: im.entity.clone(),
+                canonical: im.canonical_column.clone(),
                 alternates: Vec::new(),
             }).collect(),
             key_mappings: Vec::new(),
@@ -110,7 +110,7 @@ impl MetadataRepository {
     }
     
     async fn load_entities(&self) -> Result<Vec<Entity>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT id, name, description, grain, attributes
             FROM entities
@@ -121,17 +121,21 @@ impl MetadataRepository {
         .await
         .map_err(|e| RcaError::Database(format!("Failed to load entities: {}", e)))?;
         
-        Ok(rows.into_iter().map(|row| Entity {
-            id: row.id,
-            name: row.name,
-            description: row.description,
-            grain: row.grain.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
-            attributes: row.attributes.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+        Ok(rows.into_iter().map(|row| {
+            let grain_val: Option<serde_json::Value> = row.try_get("grain").ok();
+            let attrs_val: Option<serde_json::Value> = row.try_get("attributes").ok();
+            Entity {
+                id: row.try_get("id").unwrap_or_default(),
+                name: row.try_get("name").unwrap_or_default(),
+                description: row.try_get::<Option<String>, _>("description").ok().flatten().unwrap_or_default(),
+                grain: grain_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+                attributes: attrs_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+            }
         }).collect())
     }
     
     async fn load_tables(&self) -> Result<Vec<Table>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT name, entity_id, primary_key, time_column, system, path, columns, labels
             FROM tables
@@ -142,20 +146,25 @@ impl MetadataRepository {
         .await
         .map_err(|e| RcaError::Database(format!("Failed to load tables: {}", e)))?;
         
-        Ok(rows.into_iter().map(|row| Table {
-            name: row.name,
-            entity: row.entity_id.unwrap_or_default(),
-            primary_key: row.primary_key.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
-            time_column: row.time_column.unwrap_or_default(),
-            system: row.system,
-            path: row.path.unwrap_or_default(),
-            columns: row.columns.and_then(|v| serde_json::from_value(v).ok()),
-            labels: row.labels.and_then(|v| serde_json::from_value(v).ok()),
+        Ok(rows.into_iter().map(|row| {
+            let pk_val: Option<serde_json::Value> = row.try_get("primary_key").ok();
+            let cols_val: Option<serde_json::Value> = row.try_get("columns").ok();
+            let labels_val: Option<serde_json::Value> = row.try_get("labels").ok();
+            Table {
+                name: row.try_get::<String, _>("name").unwrap_or_default(),
+                entity: row.try_get::<Option<String>, _>("entity_id").unwrap_or_default().unwrap_or_default(),
+                primary_key: pk_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+                time_column: row.try_get::<Option<String>, _>("time_column").unwrap_or_default(),
+                system: row.try_get::<String, _>("system").unwrap_or_default(),
+                path: row.try_get::<Option<String>, _>("path").unwrap_or_default().unwrap_or_default(),
+                columns: cols_val.and_then(|v| serde_json::from_value(v).ok()),
+                labels: labels_val.and_then(|v| serde_json::from_value(v).ok()),
+            }
         }).collect())
     }
     
     async fn load_metrics(&self) -> Result<Vec<Metric>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT id, name, description, grain, precision, null_policy, unit, versions
             FROM metrics
@@ -166,20 +175,24 @@ impl MetadataRepository {
         .await
         .map_err(|e| RcaError::Database(format!("Failed to load metrics: {}", e)))?;
         
-        Ok(rows.into_iter().map(|row| Metric {
-            id: row.id,
-            name: row.name,
-            description: row.description,
-            grain: row.grain.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
-            precision: row.precision.unwrap_or(2) as u32,
-            null_policy: row.null_policy.unwrap_or_else(|| "zero".to_string()),
-            unit: row.unit.unwrap_or_else(|| "currency".to_string()),
-            versions: row.versions.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+        Ok(rows.into_iter().map(|row| {
+            let grain_val: Option<serde_json::Value> = row.try_get("grain").ok();
+            let versions_val: Option<serde_json::Value> = row.try_get("versions").ok();
+            Metric {
+                id: row.try_get::<String, _>("id").unwrap_or_default(),
+                name: row.try_get::<String, _>("name").unwrap_or_default(),
+                description: row.try_get::<Option<String>, _>("description").ok().flatten().unwrap_or_default(),
+                grain: grain_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+                precision: row.try_get::<Option<i32>, _>("precision").unwrap_or_default().unwrap_or(2) as u32,
+                null_policy: row.try_get::<Option<String>, _>("null_policy").unwrap_or_default().unwrap_or_else(|| "zero".to_string()),
+                unit: row.try_get::<Option<String>, _>("unit").unwrap_or_default().unwrap_or_else(|| "currency".to_string()),
+                versions: versions_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+            }
         }).collect())
     }
     
     async fn load_rules(&self) -> Result<Vec<Rule>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT id, system, metric_id, target_entity_id, target_grain,
                    description, formula, source_entities, aggregation_grain,
@@ -194,30 +207,32 @@ impl MetadataRepository {
         
         Ok(rows.into_iter().map(|row| {
             let attributes_needed: HashMap<String, Vec<String>> = HashMap::new();
+            let target_grain_val: Option<serde_json::Value> = row.try_get("target_grain").ok();
+            let source_entities_val: Option<serde_json::Value> = row.try_get("source_entities").ok();
             
             Rule {
-                id: row.id,
-                system: row.system,
-                metric: row.metric_id.unwrap_or_default(),
-                target_entity: row.target_entity_id.unwrap_or_default(),
-                target_grain: row.target_grain.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+                id: row.try_get::<String, _>("id").unwrap_or_default(),
+                system: row.try_get::<String, _>("system").unwrap_or_default(),
+                metric: row.try_get::<Option<String>, _>("metric_id").unwrap_or_default().unwrap_or_default(),
+                target_entity: row.try_get::<Option<String>, _>("target_entity_id").unwrap_or_default().unwrap_or_default(),
+                target_grain: target_grain_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
                 computation: ComputationDefinition {
-                    description: row.description.unwrap_or_default(),
-                    source_entities: row.source_entities.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+                    description: row.try_get::<Option<String>, _>("description").unwrap_or_default().unwrap_or_default(),
+                    source_entities: source_entities_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
                     attributes_needed,
-                    formula: row.formula.unwrap_or_default(),
-                    aggregation_grain: row.aggregation_grain.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
-                    filter_conditions: row.filter_conditions.and_then(|v| serde_json::from_value(v).ok()),
-                    source_table: row.source_table,
-                    note: row.note,
+                    formula: row.try_get::<Option<String>, _>("formula").unwrap_or_default().unwrap_or_default(),
+                    aggregation_grain: row.try_get::<Option<serde_json::Value>, _>("aggregation_grain").ok().flatten().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+                    filter_conditions: row.try_get::<Option<serde_json::Value>, _>("filter_conditions").ok().flatten().and_then(|v| serde_json::from_value(v).ok()),
+                    source_table: row.try_get::<Option<String>, _>("source_table").ok().flatten(),
+                    note: row.try_get::<Option<String>, _>("note").ok().flatten(),
                 },
-                labels: row.labels.and_then(|v| serde_json::from_value(v).ok()),
+                labels: row.try_get::<Option<serde_json::Value>, _>("labels").ok().flatten().and_then(|v| serde_json::from_value(v).ok()),
             }
         }).collect())
     }
     
     async fn load_lineage_edges(&self) -> Result<Vec<LineageEdge>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT from_table, to_table, keys, relationship
             FROM lineage_edges
@@ -228,16 +243,19 @@ impl MetadataRepository {
         .await
         .map_err(|e| RcaError::Database(format!("Failed to load lineage edges: {}", e)))?;
         
-        Ok(rows.into_iter().map(|row| LineageEdge {
-            from: row.from_table.unwrap_or_default(),
-            to: row.to_table.unwrap_or_default(),
-            keys: row.keys.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
-            relationship: row.relationship.unwrap_or_else(|| "join".to_string()),
+        Ok(rows.into_iter().map(|row| {
+            let keys_val: Option<serde_json::Value> = row.try_get("keys").ok();
+            LineageEdge {
+                from: row.try_get::<String, _>("from_table").unwrap_or_default(),
+                to: row.try_get::<String, _>("to_table").unwrap_or_default(),
+                keys: keys_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+                relationship: row.try_get::<Option<String>, _>("relationship").unwrap_or_default().unwrap_or_else(|| "join".to_string()),
+            }
         }).collect())
     }
     
     async fn load_business_labels(&self) -> Result<BusinessLabelObject> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT label_type, label, aliases, system_id, metric_id
             FROM business_labels
@@ -253,23 +271,25 @@ impl MetadataRepository {
         let mut reconciliation_types = Vec::new();
         
         for row in rows {
-            let aliases: Vec<String> = row.aliases
+            let aliases_val: Option<serde_json::Value> = row.try_get("aliases").ok();
+            let aliases: Vec<String> = aliases_val
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default();
             
-            match row.label_type.as_str() {
+            let label_type: String = row.try_get::<String, _>("label_type").unwrap_or_default();
+            match label_type.as_str() {
                 "system" => systems.push(SystemLabel {
-                    label: row.label,
+                    label: row.try_get::<String, _>("label").unwrap_or_default(),
                     aliases,
-                    system_id: row.system_id.unwrap_or_default(),
+                    system_id: row.try_get::<Option<String>, _>("system_id").unwrap_or_default().unwrap_or_default(),
                 }),
                 "metric" => metrics.push(MetricLabel {
-                    label: row.label,
+                    label: row.try_get::<String, _>("label").unwrap_or_default(),
                     aliases,
-                    metric_id: row.metric_id.unwrap_or_default(),
+                    metric_id: row.try_get::<Option<String>, _>("metric_id").unwrap_or_default().unwrap_or_default(),
                 }),
                 "reconciliation_type" => reconciliation_types.push(ReconciliationTypeLabel {
-                    label: row.label,
+                    label: row.try_get::<String, _>("label").unwrap_or_default(),
                     aliases,
                 }),
                 _ => {}
@@ -284,7 +304,7 @@ impl MetadataRepository {
     }
     
     async fn load_time_rules(&self) -> Result<TimeRules> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT table_name, rule_type, as_of_column, default_value, max_lateness_days, action
             FROM time_rules
@@ -299,16 +319,17 @@ impl MetadataRepository {
         let mut lateness_rules = Vec::new();
         
         for row in rows {
-            match row.rule_type.as_str() {
+            let rule_type: String = row.try_get::<String, _>("rule_type").unwrap_or_default();
+            match rule_type.as_str() {
                 "as_of" => as_of_rules.push(AsOfRule {
-                    table: row.table_name.unwrap_or_default(),
-                    as_of_column: row.as_of_column.unwrap_or_default(),
-                    default: row.default_value.unwrap_or_default(),
+                    table: row.try_get::<String, _>("table_name").unwrap_or_default(),
+                    as_of_column: row.try_get::<String, _>("as_of_column").unwrap_or_default(),
+                    default: row.try_get::<String, _>("default_value").unwrap_or_default(),
                 }),
                 "lateness" => lateness_rules.push(LatenessRule {
-                    table: row.table_name.unwrap_or_default(),
-                    max_lateness_days: row.max_lateness_days.unwrap_or(0) as u32,
-                    action: row.action.unwrap_or_default(),
+                    table: row.try_get::<String, _>("table_name").unwrap_or_default(),
+                    max_lateness_days: row.try_get::<Option<i32>, _>("max_lateness_days").unwrap_or_default().unwrap_or(0) as u32,
+                    action: row.try_get::<String, _>("action").unwrap_or_default(),
                 }),
                 _ => {}
             }
@@ -320,15 +341,14 @@ impl MetadataRepository {
         })
     }
     
-    async fn load_identity_mappings(&self) -> Result<Vec<IdentityMapping>> {
+    async fn load_identity_mappings(&self) -> Result<Vec<crate::core::identity::IdentityMapping>> {
         #[derive(Debug)]
-        struct IdentityMapping {
+        struct IdentityMappingRow {
             entity_id: Option<String>,
             canonical_key: Option<String>,
         }
         
-        let rows = sqlx::query_as!(
-            IdentityMapping,
+        let rows = sqlx::query(
             r#"
             SELECT entity_id, canonical_key
             FROM identity_mappings
@@ -339,11 +359,27 @@ impl MetadataRepository {
         .await
         .map_err(|e| RcaError::Database(format!("Failed to load identity mappings: {}", e)))?;
         
-        Ok(rows)
+        // Convert to IdentityMapping format
+        let mappings: Vec<crate::core::identity::IdentityMapping> = rows.into_iter()
+            .filter_map(|row| {
+                let entity_id: Option<String> = row.try_get("entity_id").ok()?;
+                let canonical_key: Option<String> = row.try_get("canonical_key").ok()?;
+                Some(crate::core::identity::IdentityMapping {
+                    entity: entity_id?,
+                    system: "unknown".to_string(), // Database doesn't store system
+                    column: "unknown".to_string(), // Database doesn't store column
+                    canonical_column: canonical_key?,
+                    data_type: None,
+                    confidence: None,
+                })
+            })
+            .collect();
+        
+        Ok(mappings)
     }
     
     async fn load_exceptions(&self) -> Result<Vec<Exception>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT id, description, table_name, filter_condition, applies_to, override_fields
             FROM exceptions
@@ -354,15 +390,19 @@ impl MetadataRepository {
         .await
         .map_err(|e| RcaError::Database(format!("Failed to load exceptions: {}", e)))?;
         
-        Ok(rows.into_iter().map(|row| Exception {
-            id: row.id,
-            description: row.description.unwrap_or_default(),
-            condition: ExceptionCondition {
-                table: row.table_name.unwrap_or_default(),
-                filter: row.filter_condition.unwrap_or_default(),
-            },
-            applies_to: row.applies_to.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
-            override_field: row.override_fields.and_then(|v| serde_json::from_value(v).ok()),
+        Ok(rows.into_iter().map(|row| {
+            let applies_to_val: Option<serde_json::Value> = row.try_get("applies_to").ok();
+            let override_fields_val: Option<serde_json::Value> = row.try_get("override_fields").ok();
+            Exception {
+                id: row.try_get::<String, _>("id").unwrap_or_default(),
+                description: row.try_get::<String, _>("description").unwrap_or_default(),
+                condition: ExceptionCondition {
+                    table: row.try_get::<String, _>("table_name").unwrap_or_default(),
+                    filter: row.try_get::<String, _>("filter_condition").unwrap_or_default(),
+                },
+                applies_to: applies_to_val.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+                override_field: override_fields_val.and_then(|v| serde_json::from_value(v).ok()),
+            }
         }).collect())
     }
     
@@ -388,7 +428,7 @@ impl MetadataRepository {
             let attributes = serde_json::to_value(&entity.attributes)
                 .map_err(|e| RcaError::Database(format!("Failed to serialize attributes: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO entities (id, name, description, grain, attributes)
                 VALUES ($1, $2, $3, $4, $5)
@@ -398,13 +438,13 @@ impl MetadataRepository {
                     grain = EXCLUDED.grain,
                     attributes = EXCLUDED.attributes,
                     updated_at = NOW()
-                "#,
-                entity.id,
-                entity.name,
-                entity.description,
-                grain,
-                attributes
+                "#
             )
+            .bind(&entity.id)
+            .bind(&entity.name)
+            .bind(&entity.description)
+            .bind(&grain)
+            .bind(&attributes)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert entity {}: {}", entity.id, e)))?;
@@ -419,7 +459,7 @@ impl MetadataRepository {
             let versions = serde_json::to_value(&metric.versions)
                 .map_err(|e| RcaError::Database(format!("Failed to serialize versions: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO metrics (id, name, description, grain, precision, null_policy, unit, versions)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -432,16 +472,16 @@ impl MetadataRepository {
                     unit = EXCLUDED.unit,
                     versions = EXCLUDED.versions,
                     updated_at = NOW()
-                "#,
-                metric.id,
-                metric.name,
-                metric.description,
-                grain,
-                metric.precision as i32,
-                metric.null_policy,
-                metric.unit,
-                versions
+                "#
             )
+            .bind(&metric.id)
+            .bind(&metric.name)
+            .bind(&metric.description)
+            .bind(&grain)
+            .bind(metric.precision as i32)
+            .bind(&metric.null_policy)
+            .bind(&metric.unit)
+            .bind(&versions)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert metric {}: {}", metric.id, e)))?;
@@ -462,7 +502,7 @@ impl MetadataRepository {
                 .transpose()
                 .map_err(|e| RcaError::Database(format!("Failed to serialize labels: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO tables (name, entity_id, primary_key, time_column, system, path, columns, labels)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -475,16 +515,16 @@ impl MetadataRepository {
                     columns = EXCLUDED.columns,
                     labels = EXCLUDED.labels,
                     updated_at = NOW()
-                "#,
-                table.name,
-                table.entity,
-                primary_key,
-                table.time_column,
-                table.system,
-                table.path,
-                columns,
-                labels
+                "#
             )
+            .bind(&table.name)
+            .bind(&table.entity)
+            .bind(&primary_key)
+            .bind(&table.time_column)
+            .bind(&table.system)
+            .bind(&table.path)
+            .bind(&columns)
+            .bind(&labels)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert table {}: {}", table.name, e)))?;
@@ -509,7 +549,7 @@ impl MetadataRepository {
                 .transpose()
                 .map_err(|e| RcaError::Database(format!("Failed to serialize labels: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO rules (id, system, metric_id, target_entity_id, target_grain,
                                  description, formula, source_entities, aggregation_grain,
@@ -529,21 +569,21 @@ impl MetadataRepository {
                     note = EXCLUDED.note,
                     labels = EXCLUDED.labels,
                     updated_at = NOW()
-                "#,
-                rule.id,
-                rule.system,
-                rule.metric,
-                rule.target_entity,
-                target_grain,
-                rule.computation.description,
-                rule.computation.formula,
-                source_entities,
-                aggregation_grain,
-                filter_conditions,
-                rule.computation.source_table,
-                rule.computation.note,
-                labels
+                "#
             )
+            .bind(&rule.id)
+            .bind(&rule.system)
+            .bind(&rule.metric)
+            .bind(&rule.target_entity)
+            .bind(&target_grain)
+            .bind(&rule.computation.description)
+            .bind(&rule.computation.formula)
+            .bind(&source_entities)
+            .bind(&aggregation_grain)
+            .bind(&filter_conditions)
+            .bind(&rule.computation.source_table)
+            .bind(&rule.computation.note)
+            .bind(&labels)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert rule {}: {}", rule.id, e)))?;
@@ -553,7 +593,7 @@ impl MetadataRepository {
     
     async fn insert_lineage_edges(&self, edges: &[LineageEdge]) -> Result<()> {
         // Clear existing edges first
-        sqlx::query!("DELETE FROM lineage_edges")
+        sqlx::query("DELETE FROM lineage_edges")
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to clear lineage edges: {}", e)))?;
@@ -562,16 +602,16 @@ impl MetadataRepository {
             let keys = serde_json::to_value(&edge.keys)
                 .map_err(|e| RcaError::Database(format!("Failed to serialize keys: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO lineage_edges (from_table, to_table, keys, relationship)
                 VALUES ($1, $2, $3, $4)
-                "#,
-                edge.from,
-                edge.to,
-                keys,
-                edge.relationship
+                "#
             )
+            .bind(&edge.from)
+            .bind(&edge.to)
+            .bind(&keys)
+            .bind(&edge.relationship)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert lineage edge: {}", e)))?;
@@ -581,7 +621,7 @@ impl MetadataRepository {
     
     async fn insert_business_labels(&self, labels: &BusinessLabelObject) -> Result<()> {
         // Clear existing labels first
-        sqlx::query!("DELETE FROM business_labels")
+        sqlx::query("DELETE FROM business_labels")
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to clear business labels: {}", e)))?;
@@ -590,15 +630,15 @@ impl MetadataRepository {
             let aliases = serde_json::to_value(&system.aliases)
                 .map_err(|e| RcaError::Database(format!("Failed to serialize aliases: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO business_labels (label_type, label, aliases, system_id)
                 VALUES ('system', $1, $2, $3)
-                "#,
-                system.label,
-                aliases,
-                system.system_id
+                "#
             )
+            .bind(&system.label)
+            .bind(&aliases)
+            .bind(&system.system_id)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert system label: {}", e)))?;
@@ -608,15 +648,15 @@ impl MetadataRepository {
             let aliases = serde_json::to_value(&metric.aliases)
                 .map_err(|e| RcaError::Database(format!("Failed to serialize aliases: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO business_labels (label_type, label, aliases, metric_id)
                 VALUES ('metric', $1, $2, $3)
-                "#,
-                metric.label,
-                aliases,
-                metric.metric_id
+                "#
             )
+            .bind(&metric.label)
+            .bind(&aliases)
+            .bind(&metric.metric_id)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert metric label: {}", e)))?;
@@ -626,14 +666,14 @@ impl MetadataRepository {
             let aliases = serde_json::to_value(&recon_type.aliases)
                 .map_err(|e| RcaError::Database(format!("Failed to serialize aliases: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO business_labels (label_type, label, aliases)
                 VALUES ('reconciliation_type', $1, $2)
-                "#,
-                recon_type.label,
-                aliases
+                "#
             )
+            .bind(&recon_type.label)
+            .bind(&aliases)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert reconciliation type label: {}", e)))?;
@@ -644,36 +684,36 @@ impl MetadataRepository {
     
     async fn insert_time_rules(&self, time_rules: &TimeRules) -> Result<()> {
         // Clear existing time rules first
-        sqlx::query!("DELETE FROM time_rules")
+        sqlx::query("DELETE FROM time_rules")
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to clear time rules: {}", e)))?;
         
         for rule in &time_rules.as_of_rules {
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO time_rules (table_name, rule_type, as_of_column, default_value)
                 VALUES ($1, 'as_of', $2, $3)
-                "#,
-                rule.table,
-                rule.as_of_column,
-                rule.default
+                "#
             )
+            .bind(&rule.table)
+            .bind(&rule.as_of_column)
+            .bind(&rule.default)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert as_of rule: {}", e)))?;
         }
         
         for rule in &time_rules.lateness_rules {
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO time_rules (table_name, rule_type, max_lateness_days, action)
                 VALUES ($1, 'lateness', $2, $3)
-                "#,
-                rule.table,
-                rule.max_lateness_days as i32,
-                rule.action
+                "#
             )
+            .bind(&rule.table)
+            .bind(rule.max_lateness_days as i32)
+            .bind(&rule.action)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert lateness rule: {}", e)))?;
@@ -691,7 +731,7 @@ impl MetadataRepository {
                 .transpose()
                 .map_err(|e| RcaError::Database(format!("Failed to serialize override_fields: {}", e)))?;
             
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO exceptions (id, description, table_name, filter_condition, applies_to, override_fields)
                 VALUES ($1, $2, $3, $4, $5, $6)
@@ -701,14 +741,14 @@ impl MetadataRepository {
                     filter_condition = EXCLUDED.filter_condition,
                     applies_to = EXCLUDED.applies_to,
                     override_fields = EXCLUDED.override_fields
-                "#,
-                exception.id,
-                exception.description,
-                exception.condition.table,
-                exception.condition.filter,
-                applies_to,
-                override_fields
+                "#
             )
+            .bind(&exception.id)
+            .bind(&exception.description)
+            .bind(&exception.condition.table)
+            .bind(&exception.condition.filter)
+            .bind(&applies_to)
+            .bind(&override_fields)
             .execute(&self.pool)
             .await
             .map_err(|e| RcaError::Database(format!("Failed to insert exception {}: {}", exception.id, e)))?;

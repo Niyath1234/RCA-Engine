@@ -41,7 +41,7 @@ lazy_static::lazy_static! {
         let store = LearningStore::load(&learning_path)
             .unwrap_or_else(|_| {
                 eprintln!("[INFO] Creating new Learning Store");
-                LearningStore::new(&learning_path)
+                LearningStore::new(&learning_path).unwrap()
             });
         Arc::new(Mutex::new(store))
     };
@@ -235,6 +235,18 @@ async fn handle_request(request: &str) -> String {
                     eprintln!("Error loading rules: {}", e);
                     create_response(200, "OK", r#"{"rules":[]}"#)
                 }
+            }
+        }
+        ("GET", "/api/metadata") => {
+            match get_all_metadata().await {
+                Ok(json) => create_response(200, "OK", &json),
+                Err(e) => create_response(500, "Internal Server Error", &format!(r#"{{"error":"{}"}}"#, e)),
+            }
+        }
+        ("GET", "/api/knowledge/entries") => {
+            match get_knowledge_entries().await {
+                Ok(json) => create_response(200, "OK", &json),
+                Err(e) => create_response(500, "Internal Server Error", &format!(r#"{{"error":"{}"}}"#, e)),
             }
         }
         ("GET", "/api/knowledge-base") => {
@@ -1083,8 +1095,7 @@ async fn execute_graph_traverse(
         .with_llm(llm)
         .with_knowledge_hints_from_path(kb_path)?;
     
-    let metric = interpretation.metric.as_ref()
-        .ok_or_else(|| RcaError::Execution("Metric not specified in interpretation".to_string()))?;
+    let metric: &str = &interpretation.metric;
     
     let state = agent.traverse(
         query,
@@ -1143,6 +1154,54 @@ async fn get_pipelines_from_metadata() -> Result<String, Box<dyn std::error::Err
     });
     
     Ok(serde_json::to_string(&pipelines_json)?)
+}
+
+async fn get_all_metadata() -> Result<String, Box<dyn std::error::Error>> {
+    let metadata_dir = PathBuf::from("metadata");
+    let metadata = Metadata::load_auto(&metadata_dir).await?;
+    
+    let response = serde_json::json!({
+        "tables": metadata.tables.iter().map(|t| serde_json::json!({
+            "name": t.name,
+            "system": t.system,
+            "entity": t.entity,
+            "columns": t.columns.as_ref().map(|cols| cols.iter().map(|c| serde_json::json!({
+                "name": c.name,
+                "data_type": c.data_type
+            })).collect::<Vec<_>>()),
+            "primary_key": t.primary_key
+        })).collect::<Vec<_>>(),
+        "metrics": metadata.metrics.iter().map(|m| serde_json::json!({
+            "id": m.id,
+            "name": m.name,
+            "description": m.description
+        })).collect::<Vec<_>>()
+    });
+    
+    Ok(serde_json::to_string(&response)?)
+}
+
+async fn get_knowledge_entries() -> Result<String, Box<dyn std::error::Error>> {
+    let knowledge_path = PathBuf::from("metadata/knowledge_base.json");
+    let content = std::fs::read_to_string(&knowledge_path)?;
+    let kb: serde_json::Value = serde_json::from_str(&content)?;
+    
+    // Convert knowledge base terms to entries
+    let entries: Vec<serde_json::Value> = if let Some(terms) = kb.get("terms").and_then(|t| t.as_object()) {
+        terms.iter().map(|(key, value)| {
+            serde_json::json!({
+                "id": key,
+                "title": value.get("definition").and_then(|v| v.as_str()).unwrap_or(key),
+                "content": value.get("business_meaning").and_then(|v| v.as_str()).unwrap_or(""),
+                "type": "term",
+                "tags": value.get("related_tables").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()).unwrap_or_default()
+            })
+        }).collect()
+    } else {
+        vec![]
+    };
+    
+    Ok(serde_json::to_string(&entries)?)
 }
 
 async fn get_rules_from_metadata() -> Result<String, Box<dyn std::error::Error>> {

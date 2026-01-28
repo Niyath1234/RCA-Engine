@@ -77,3 +77,65 @@ export const reasoningAPI = {
   },
 };
 
+export const assistantAPI = {
+  ask: async (question: string): Promise<any> => {
+    const response = await axios.post(`${API_BASE_URL}/api/assistant/ask`, {
+      question,
+    });
+    return response.data;
+  },
+};
+
+export interface QueryGenerationResult {
+  success: boolean;
+  sql?: string;
+  metric?: {
+    name: string;
+    description: string;
+  } | null;
+  dimensions?: Array<{
+    name: string;
+    description: string;
+  }>;
+  joins?: Array<{
+    from_table: string;
+    to_table: string;
+    on: string;
+  }>;
+  filters?: string[] | Array<Record<string, any>>;
+  error?: string;
+  suggestion?: string;
+  business_rules_applied?: string[];
+  reasoning_steps?: string[];
+  method?: string;
+  intent?: Record<string, any>;
+}
+
+export interface PrerequisitesResult {
+  success: boolean;
+  metadata?: {
+    semantic_registry: any;
+    tables: any;
+  };
+  loaded?: {
+    metrics: number;
+    dimensions: number;
+    tables: number;
+  };
+  error?: string;
+}
+
+export const queryAPI = {
+  loadPrerequisites: async (): Promise<PrerequisitesResult> => {
+    const response = await axios.get(`${API_BASE_URL}/api/query/load-prerequisites`);
+    return response.data;
+  },
+  generateSQL: async (query: string, useLLM: boolean = true): Promise<QueryGenerationResult> => {
+    const response = await axios.post(`${API_BASE_URL}/api/query/generate-sql`, {
+      query,
+      use_llm: useLLM,
+    });
+    return response.data;
+  },
+};
+

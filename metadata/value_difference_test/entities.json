@@ -1,9 +1,0 @@
-[
-  {
-    "id": "customer",
-    "name": "Customer",
-    "description": "Customer entity",
-    "attributes": ["customer_id", "total_outstanding"]
-  }
-]
-

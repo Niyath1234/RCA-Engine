@@ -3,6 +3,7 @@
 //! Defines function schemas for OpenAI function calling API.
 
 use crate::intent::SemanticSqlIntent;
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -62,7 +63,7 @@ DO NOT output join types - only dimension usage."#.to_string(),
                     "items": {
                         "type": "string"
                     },
-                    "description": "List of metric names from semantic registry (e.g., 'tos', 'pos', 'active_users')"
+                    "description": "List of metric names from semantic registry (e.g., 'tos', 'pos', 'active_users'). REQUIRED for METRIC queries, OPTIONAL for RELATIONAL queries (can be empty array)."
                 },
                 "dimension_intents": {
                     "type": "array",
@@ -140,7 +141,7 @@ DO NOT output join types - only dimension usage."#.to_string(),
                     "description": "Maximum number of rows to return"
                 }
             },
-            "required": ["metrics"]
+            "required": []
         }),
     }
 }

@@ -179,3 +179,7 @@ class KnowledgeRegisterSyncer:
             "total_tables": total_tables
         }
 
+
+
+
+

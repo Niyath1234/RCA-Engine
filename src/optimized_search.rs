@@ -146,6 +146,15 @@ pub struct OptimizedSearch {
     max_cache_size: usize,
 }
 
+impl std::fmt::Debug for OptimizedSearch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OptimizedSearch")
+            .field("cache_ttl", &self.cache_ttl)
+            .field("max_cache_size", &self.max_cache_size)
+            .finish_non_exhaustive()
+    }
+}
+
 impl OptimizedSearch {
     /// Create a new optimized search engine
     pub fn new() -> Self {

@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
     
     println!("🚀 RCA Engine - Metadata Migration to PostgreSQL\n");
-    println!("=" .repeat(70));
+    println!("{}", "=".repeat(70));
     
     // Get database URL from environment
     let database_url = std::env::var("DATABASE_URL")
@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     
     println!("\n📥 Inserting metadata into PostgreSQL...");
-    println!("-" .repeat(70));
+    println!("{}", "-".repeat(70));
     
     let repo = MetadataRepository::new(pool);
     

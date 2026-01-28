@@ -65,6 +65,12 @@ app.get('/', (req, res) => {
       reasoning: '/api/reasoning/query',
       rules: '/api/rules',
       ingestion: '/api/ingestion',
+      metadata: {
+        ingest_table: '/api/metadata/ingest/table',
+        ingest_join: '/api/metadata/ingest/join',
+        ingest_rules: '/api/metadata/ingest/rules',
+        ingest_complete: '/api/metadata/ingest/complete',
+      },
     },
   });
 });
@@ -195,143 +201,211 @@ app.get('/api/pipelines/:id/status', (req, res) => {
   res.json({ status: pipeline.status, lastRun: pipeline.lastRun });
 });
 
-// Reasoning API
+// Query Regeneration API - Load metadata and generate SQL from natural language
+// Query Builder API - Load metadata and business rules, build SQL from natural language
+app.get('/api/query/load-prerequisites', async (req, res) => {
+  try {
+    const path = require('path');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const projectRoot = path.join(__dirname, '..');
+    const scriptPath = path.join(__dirname, 'query_regeneration_api.py');
+    
+    const { stdout, stderr } = await execAsync(`cd ${projectRoot} && python3 ${scriptPath} load`, {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    
+    const result = JSON.parse(stdout.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.stderr || error.stdout,
+    });
+  }
+});
+
+app.post('/api/query/generate-sql', async (req, res) => {
+  try {
+    const { query, use_llm } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+    
+    const path = require('path');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const projectRoot = path.join(__dirname, '..');
+    const scriptPath = path.join(__dirname, 'query_regeneration_api.py');
+    
+    // Pass query via stdin, with use_llm flag (defaults to true if OPENAI_API_KEY is set)
+    const useLLMFlag = use_llm !== false && process.env.OPENAI_API_KEY ? true : false;
+    const inputData = JSON.stringify({ command: 'generate', query, use_llm: useLLMFlag });
+    
+    // Pass environment variables (especially OPENAI_API_KEY) to Python script
+    const env = { ...process.env };
+    const { stdout, stderr } = await execAsync(
+      `cd ${projectRoot} && echo '${inputData}' | python3 ${scriptPath}`,
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        env: env, // Pass all environment variables including OPENAI_API_KEY
+      }
+    );
+    
+    const result = JSON.parse(stdout.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.stderr || error.stdout,
+    });
+  }
+});
+
+// Reasoning API - Uses LLM Query Generator with Chain of Thought
 app.post('/api/reasoning/query', async (req, res) => {
   const { query, context } = req.body;
   
-  // Add reasoning steps
-  const steps = [
-    {
-      type: 'thought',
-      content: `Analyzing query: "${query}"`,
-      timestamp: new Date().toISOString(),
-    },
-    {
-      type: 'thought',
-      content: 'Checking available pipelines and data sources...',
-      timestamp: new Date().toISOString(),
-    },
-  ];
-
-  // If query mentions reconciliation or ledger balance
-  if (query.toLowerCase().includes('recon') || query.toLowerCase().includes('ledger')) {
-    // Find CSV pipelines
-    const csvPipelines = pipelines.filter(p => p.type === 'csv' && p.source);
+  if (!query) {
+    return res.status(400).json({ error: 'Query is required' });
+  }
+  
+  try {
+    const path = require('path');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
     
-    if (csvPipelines.length >= 2) {
+    const projectRoot = path.join(__dirname, '..');
+    const scriptPath = path.join(__dirname, 'query_regeneration_api.py');
+    
+    // Use LLM by default if API key is available
+    const useLLM = process.env.OPENAI_API_KEY ? true : false;
+    const inputData = JSON.stringify({ command: 'generate', query, use_llm: useLLM });
+    
+    // Pass environment variables (especially OPENAI_API_KEY) to Python script
+    const env = { ...process.env };
+    const { stdout, stderr } = await execAsync(
+      `cd ${projectRoot} && echo '${inputData}' | python3 ${scriptPath}`,
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        env: env,
+      }
+    );
+    
+    const result = JSON.parse(stdout.trim());
+    
+    // Convert reasoning_steps to the format expected by UI
+    const steps = [];
+    
+    // Add initial step
+    steps.push({
+      type: 'thought',
+      content: `🔍 Analyzing query: "${query}"`,
+      timestamp: new Date().toISOString(),
+    });
+    
+    // Add reasoning steps from LLM if available
+    if (result.reasoning_steps && Array.isArray(result.reasoning_steps)) {
+      result.reasoning_steps.forEach((stepContent, index) => {
+        // Determine step type based on content
+        let stepType = 'thought';
+        if (stepContent.includes('✅') || stepContent.includes('Generated')) {
+          stepType = 'result';
+        } else if (stepContent.includes('❌') || stepContent.includes('Error')) {
+          stepType = 'error';
+        } else if (stepContent.includes('🔧') || stepContent.includes('Building')) {
+          stepType = 'action';
+        } else if (stepContent.includes('📊') || stepContent.includes('SQL')) {
+          stepType = 'result';
+        }
+        
+        steps.push({
+          type: stepType,
+          content: stepContent,
+          timestamp: new Date(Date.now() + index * 100).toISOString(), // Slight delay for ordering
+        });
+      });
+    } else {
+      // Fallback: add basic steps
       steps.push({
-        type: 'action',
-        content: `Found ${csvPipelines.length} CSV pipelines. Comparing ledger balances...`,
+        type: 'thought',
+        content: '📊 Loading metadata and analyzing available tables...',
         timestamp: new Date().toISOString(),
       });
-
-      try {
-        // Read both CSVs and compare ledger balances
-        const summaries = await Promise.all(
-          csvPipelines.slice(0, 2).map(p => readCSVSummary(p.source))
-        );
-
-        const [summary1, summary2] = summaries;
+      
+      if (result.success) {
+        steps.push({
+          type: 'action',
+          content: '🤖 Generating SQL using LLM with comprehensive context...',
+          timestamp: new Date().toISOString(),
+        });
         
-        // Calculate ledger balance differences
-        if (summary1.columns.includes('leadger_balance') && summary2.columns.includes('leadger_balance')) {
-          const data1 = await new Promise((resolve, reject) => {
-            const results = [];
-            fs.createReadStream(csvPipelines[0].source)
-              .pipe(csv())
-              .on('data', (d) => results.push(d))
-              .on('end', () => resolve(results))
-              .on('error', reject);
-          });
-
-          const data2 = await new Promise((resolve, reject) => {
-            const results = [];
-            fs.createReadStream(csvPipelines[1].source)
-              .pipe(csv())
-              .on('data', (d) => results.push(d))
-              .on('end', () => resolve(results))
-              .on('error', reject);
-          });
-
-          // Create a map by loan_account_id
-          const map1 = new Map(data1.map(d => [d.loan_account_id, parseFloat(d.leadger_balance || 0)]));
-          const map2 = new Map(data2.map(d => [d.loan_account_id, parseFloat(d.leadger_balance || 0)]));
-
-          const differences = [];
-          const allIds = new Set([...map1.keys(), ...map2.keys()]);
-
-          for (const id of allIds) {
-            const bal1 = map1.get(id) || 0;
-            const bal2 = map2.get(id) || 0;
-            const diff = bal1 - bal2;
-            
-            if (Math.abs(diff) > 0.01) { // Only show significant differences
-              differences.push({
-                loan_account_id: id,
-                scf_v1_balance: bal1,
-                scf_v2_balance: bal2,
-                difference: diff,
-              });
-            }
-          }
-
-          const totalDiff = differences.reduce((sum, d) => sum + d.difference, 0);
-          const totalV1 = Array.from(map1.values()).reduce((a, b) => a + b, 0);
-          const totalV2 = Array.from(map2.values()).reduce((a, b) => a + b, 0);
-
+        if (result.sql) {
           steps.push({
             type: 'result',
-            content: `Reconciliation Analysis Complete:\n\n` +
-              `Total Accounts in v1: ${map1.size}\n` +
-              `Total Accounts in v2: ${map2.size}\n` +
-              `Total Ledger Balance (v1): ${totalV1.toLocaleString()}\n` +
-              `Total Ledger Balance (v2): ${totalV2.toLocaleString()}\n` +
-              `Total Difference: ${totalDiff.toLocaleString()}\n` +
-              `Accounts with Differences: ${differences.length}\n\n` +
-              `Top 10 Differences:\n` +
-              differences.slice(0, 10).map(d => 
-                `  Account ${d.loan_account_id}: v1=${d.scf_v1_balance.toLocaleString()}, v2=${d.scf_v2_balance.toLocaleString()}, diff=${d.difference.toLocaleString()}`
-              ).join('\n'),
+            content: `✅ Generated SQL:\n\n\`\`\`sql\n${result.sql}\n\`\`\``,
             timestamp: new Date().toISOString(),
-            metadata: {
-              totalAccountsV1: map1.size,
-              totalAccountsV2: map2.size,
-              totalBalanceV1: totalV1,
-              totalBalanceV2: totalV2,
-              totalDifference: totalDiff,
-              differencesCount: differences.length,
-              topDifferences: differences.slice(0, 10),
-            },
           });
         }
-      } catch (error) {
+      } else {
         steps.push({
           type: 'error',
-          content: `Error during reconciliation: ${error.message}`,
+          content: `❌ Error: ${result.error || 'Unknown error'}`,
           timestamp: new Date().toISOString(),
         });
       }
-    } else {
+    }
+    
+    // Add SQL result if available
+    if (result.sql && !steps.some(s => s.content.includes(result.sql.substring(0, 50)))) {
       steps.push({
-        type: 'error',
-        content: 'Need at least 2 CSV pipelines for reconciliation',
+        type: 'result',
+        content: `\`\`\`sql\n${result.sql}\n\`\`\``,
         timestamp: new Date().toISOString(),
       });
     }
-  } else {
-    steps.push({
-      type: 'result',
-      content: `Query processed: "${query}"\n\nAvailable pipelines: ${pipelines.length}\nCSV pipelines: ${pipelines.filter(p => p.type === 'csv').length}`,
-      timestamp: new Date().toISOString(),
+    
+    // Add warnings if any
+    if (result.warnings) {
+      steps.push({
+        type: 'thought',
+        content: `⚠️  Warnings: ${result.warnings}`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    
+    reasoningHistory.push(...steps);
+    
+    res.json({
+      result: result.sql || result.error || 'Query processed',
+      steps,
+      sql: result.sql,
+      intent: result.intent,
+      method: result.method || 'llm_with_full_context',
+    });
+  } catch (error) {
+    const errorSteps = [
+      {
+        type: 'error',
+        content: `❌ Error processing query: ${error.message}`,
+        timestamp: new Date().toISOString(),
+      },
+    ];
+    
+    res.status(500).json({
+      result: `Error: ${error.message}`,
+      steps: errorSteps,
+      error: error.message,
     });
   }
-
-  reasoningHistory.push(...steps);
-  
-  res.json({
-    result: steps[steps.length - 1].content,
-    steps,
-  });
 });
 
 // Ingestion API
@@ -348,6 +422,155 @@ app.post('/api/ingestion/validate', async (req, res) => {
 app.post('/api/ingestion/preview', async (req, res) => {
   const { config } = req.body;
   res.json({ preview: 'Preview data' });
+});
+
+// Metadata Ingestion API - Natural Language to Structured JSON
+app.post('/api/metadata/ingest/table', async (req, res) => {
+  try {
+    const { table_description, system, output_file } = req.body;
+    
+    if (!table_description) {
+      return res.status(400).json({ error: 'table_description is required' });
+    }
+    
+    const path = require('path');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const projectRoot = path.join(__dirname, '..');
+    const scriptPath = path.join(__dirname, 'metadata_ingestion_api.py');
+    
+    // Build command arguments
+    const args = ['table', JSON.stringify(table_description)];
+    if (system) args.push(system);
+    
+    const { stdout, stderr } = await execAsync(
+      `cd ${projectRoot} && python3 ${scriptPath} ${args.join(' ')}`,
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env },
+      }
+    );
+    
+    const result = JSON.parse(stdout.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.stderr || error.stdout,
+    });
+  }
+});
+
+app.post('/api/metadata/ingest/join', async (req, res) => {
+  try {
+    const { join_condition, output_file } = req.body;
+    
+    if (!join_condition) {
+      return res.status(400).json({ error: 'join_condition is required' });
+    }
+    
+    const path = require('path');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const projectRoot = path.join(__dirname, '..');
+    const scriptPath = path.join(__dirname, 'metadata_ingestion_api.py');
+    
+    const { stdout, stderr } = await execAsync(
+      `cd ${projectRoot} && python3 ${scriptPath} join ${JSON.stringify(join_condition)}`,
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env },
+      }
+    );
+    
+    const result = JSON.parse(stdout.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.stderr || error.stdout,
+    });
+  }
+});
+
+app.post('/api/metadata/ingest/rules', async (req, res) => {
+  try {
+    const { rules_text, output_file } = req.body;
+    
+    if (!rules_text) {
+      return res.status(400).json({ error: 'rules_text is required' });
+    }
+    
+    const path = require('path');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const projectRoot = path.join(__dirname, '..');
+    const scriptPath = path.join(__dirname, 'metadata_ingestion_api.py');
+    
+    const { stdout, stderr } = await execAsync(
+      `cd ${projectRoot} && python3 ${scriptPath} rules ${JSON.stringify(rules_text)}`,
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env },
+      }
+    );
+    
+    const result = JSON.parse(stdout.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.stderr || error.stdout,
+    });
+  }
+});
+
+app.post('/api/metadata/ingest/complete', async (req, res) => {
+  try {
+    const { metadata_text, system } = req.body;
+    
+    if (!metadata_text) {
+      return res.status(400).json({ error: 'metadata_text is required' });
+    }
+    
+    const path = require('path');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const projectRoot = path.join(__dirname, '..');
+    const scriptPath = path.join(__dirname, 'metadata_ingestion_api.py');
+    
+    // Build command arguments
+    const args = ['complete', JSON.stringify(metadata_text)];
+    if (system) args.push(system);
+    
+    const { stdout, stderr } = await execAsync(
+      `cd ${projectRoot} && python3 ${scriptPath} ${args.join(' ')}`,
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env },
+      }
+    );
+    
+    const result = JSON.parse(stdout.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.stderr || error.stdout,
+    });
+  }
 });
 
 app.listen(PORT, () => {

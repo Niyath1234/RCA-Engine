@@ -53,6 +53,7 @@ pub mod types;
 pub mod concepts;
 pub mod rules;
 pub mod vector_store;
+pub mod api_server;
 
 // Optional modules that require external dependencies
 #[cfg(feature = "semantic-resolution")]
@@ -69,6 +70,7 @@ pub use types::{ConceptType, ConceptUsage};
 pub use concepts::{KnowledgeBase, BusinessConcept};
 pub use rules::{BusinessRulesRegistry, BusinessRule, RuleState, ParsedBusinessRule};
 pub use vector_store::{VectorStore, ConceptSearchResult};
+pub use api_server::{ApiState, start_server, create_router};
 
 // Conditional exports for optional modules
 #[cfg(feature = "semantic-resolution")]

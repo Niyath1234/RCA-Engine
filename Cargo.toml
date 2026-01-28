@@ -56,27 +56,25 @@ dashmap = "7.0.0-rc2"
 # zstd = "0.13"
 
 # PostgreSQL support
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"], default-features = false }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "macros"], default-features = false }
+
+# Vector database optimization - HNSW for approximate nearest neighbor search
+# To add: Download from https://github.com/rusty-celery/hnsw-rs and add to vendor/
+# Then uncomment:
+# hnsw = "0.5"
+# Note: Using serde_json (already in dependencies) for persistence instead of bincode
+# LRU cache for embeddings  
+# lru = "0.12"
 
 [[bin]]
 name = "server"
 path = "src/bin/server.rs"
 
-[[bin]]
-name = "load_tables_data"
-path = "load_tables_data.rs"
-
-[[bin]]
-name = "load_scf_data"
-path = "load_scf_data.rs"
-
-[[bin]]
-name = "create_test_tables"
-path = "create_test_tables.rs"
-
-[[bin]]
-name = "test_db_connection"
-path = "src/bin/test_db_connection.rs"
+# Removed binary definitions for files that don't exist:
+# - load_tables_data.rs
+# - load_scf_data.rs  
+# - create_test_tables.rs
+# - test_db_connection.rs
 
 [[bin]]
 name = "migrate_metadata"

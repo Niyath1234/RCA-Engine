@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// Join type - determined by compiler, not LLM
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum JoinType {
     Inner,
     Left,
@@ -40,7 +40,7 @@ impl JoinType {
 /// Cardinality of a join relationship
 /// 
 /// This is authoritative metadata - not inferred, but declared in schema.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Cardinality {
     /// One-to-one: each row in left matches at most one row in right
     OneToOne,

@@ -65,6 +65,7 @@ pub mod compiler;
 pub mod security;
 pub mod observability;
 pub mod learning;
+pub mod semantic_completeness;
 
 // Re-export Hypergraph module
 #[path = "../Hypergraph/mod.rs"]

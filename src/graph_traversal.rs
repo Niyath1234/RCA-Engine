@@ -867,46 +867,32 @@ impl GraphTraversalAgent {
                 if let Some(date) = date_constraint {
                     // Try to find date column
                     if let Some(table) = self.metadata.tables.iter().find(|t| t.name == *table_name) {
-                        if let Some(ref date_col) = table.time_column {
-                            if !date_col.is_empty() {
-                                let condition = format!("{} = '{}'", date_col, date);
-                                return self.sql_engine.probe_filter(table_name, &condition, 100).await;
-                            }
+                        if !table.time_column.is_empty() {
+                            let date_col = &table.time_column;
+                            let condition = format!("{} = '{}'", date_col, date);
+                            return self.sql_engine.probe_filter(table_name, &condition).await;
                         }
                     }
                 }
-                self.sql_engine.execute_probe(table_name, 100).await
+                let sql = format!("SELECT * FROM {} LIMIT 100", table_name);
+                self.sql_engine.execute_probe(&sql, Some(100)).await
             }
             NodeType::Join { from, to } => {
                 // Probe: Test the join
                 // Find join keys from metadata
                 let join_keys = self.find_join_keys(from, to)?;
-                // Convert HashMap to SQL join condition: "left.col1 = right.col1 AND left.col2 = right.col2"
-                let join_condition = join_keys.iter()
-                    .map(|(left_col, right_col)| format!("{}.{} = {}.{}", from, left_col, to, right_col))
-                    .collect::<Vec<_>>()
-                    .join(" AND ");
-                self.sql_engine.probe_join(from, to, &join_condition, 100).await
+                self.sql_engine.probe_join_failures(from, to, &join_keys, "left").await
             }
             NodeType::Filter { table, condition } => {
                 // Probe: Test the filter
-                self.sql_engine.probe_filter(table, condition, 100).await
+                self.sql_engine.probe_filter(table, condition).await
             }
             NodeType::Rule(rule_id) => {
                 // Probe: Execute rule calculation
                 if let Some(rule) = self.metadata.get_rule(rule_id) {
                     // Build SQL from rule
                     let sql = self.build_rule_sql(rule, date_constraint)?;
-                    // For rule probe, execute SQL directly
-                    let result = self.sql_engine.execute_sql(&sql).await?;
-                    Ok(SqlProbeResult {
-                        row_count: result.rows.len(),
-                        sample_rows: result.rows,
-                        columns: result.columns,
-                        summary: None,
-                        execution_time_ms: 0,
-                        warnings: vec![],
-                    })
+                    self.sql_engine.execute_probe(&sql, Some(100)).await
                 } else {
                     Err(RcaError::Execution(format!("Rule not found: {}", rule_id)))
                 }
@@ -922,16 +908,7 @@ impl GraphTraversalAgent {
                 let rules = self.metadata.get_rules_for_system_metric(system, name);
                 if let Some(rule) = rules.first() {
                     let sql = self.build_rule_sql(rule, date_constraint)?;
-                    // For metric probe, execute SQL directly
-                    let result = self.sql_engine.execute_sql(&sql).await?;
-                    Ok(SqlProbeResult {
-                        row_count: result.rows.len(),
-                        sample_rows: result.rows,
-                        columns: result.columns,
-                        summary: None,
-                        execution_time_ms: 0,
-                        warnings: vec![],
-                    })
+                    self.sql_engine.execute_probe(&sql, Some(100)).await
                 } else {
                     Err(RcaError::Execution(format!("No rule found for metric {} in system {}. Available rules for this system: {:?}", 
                         name, 
@@ -1019,10 +996,8 @@ impl GraphTraversalAgent {
     fn find_time_column_for_rule(&self, rule: &crate::metadata::Rule) -> Option<String> {
         if let Some(ref source_table) = rule.computation.source_table {
             if let Some(table) = self.metadata.tables.iter().find(|t| t.name == *source_table) {
-                if let Some(ref time_col) = table.time_column {
-                    if !time_col.is_empty() {
-                        return Some(time_col.clone());
-                    }
+                if !table.time_column.is_empty() {
+                    return Some(table.time_column.clone());
                 }
             }
         }
@@ -1030,10 +1005,8 @@ impl GraphTraversalAgent {
         for entity in &rule.computation.source_entities {
             if let Some(table) = self.metadata.tables.iter()
                 .find(|t| t.entity == *entity && t.system == rule.system) {
-                if let Some(ref time_col) = table.time_column {
-                    if !time_col.is_empty() {
-                        return Some(time_col.clone());
-                    }
+                if !table.time_column.is_empty() {
+                    return Some(table.time_column.clone());
                 }
             }
         }
@@ -1473,7 +1446,7 @@ impl GraphTraversalAgent {
                 system: table.system.clone(),
                 entity: table.entity.clone(),
                 primary_key: table.primary_key.clone(),
-                time_column: table.time_column.clone(),
+                time_column: if table.time_column.is_empty() { None } else { Some(table.time_column.clone()) },
                 columns,
                 labels: table.labels.as_ref().cloned().unwrap_or_default(),
                 grain,

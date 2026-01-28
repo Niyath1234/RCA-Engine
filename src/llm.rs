@@ -12,6 +12,13 @@ pub struct QueryInterpretation {
     pub as_of_date: Option<String>,
     #[serde(default = "default_confidence")]
     pub confidence: f64,
+    // Cross-metric comparison fields
+    #[serde(default)]
+    pub is_cross_metric: bool,
+    #[serde(default)]
+    pub metric_a: Option<String>,
+    #[serde(default)]
+    pub metric_b: Option<String>,
 }
 
 fn default_confidence() -> f64 {

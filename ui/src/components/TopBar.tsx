@@ -1,13 +1,8 @@
 import React from 'react';
-import { Box, Tabs, Tab, IconButton } from '@mui/material';
+import { Box, IconButton } from '@mui/material';
 import { Settings as SettingsIcon } from '@mui/icons-material';
 
-interface TopBarProps {
-  activeView: 'query' | 'chat' | 'graph';
-  onViewChange: (view: 'query' | 'chat' | 'graph') => void;
-}
-
-export const TopBar: React.FC<TopBarProps> = ({ activeView, onViewChange }) => {
+export const TopBar: React.FC = () => {
   return (
     <Box
       sx={{
@@ -21,31 +16,9 @@ export const TopBar: React.FC<TopBarProps> = ({ activeView, onViewChange }) => {
       }}
     >
       <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Tabs
-          value={activeView}
-          onChange={(_, value) => onViewChange(value)}
-          sx={{
-            minHeight: 40,
-            '& .MuiTab-root': {
-              minHeight: 40,
-              padding: '0 16px',
-              textTransform: 'none',
-              color: '#CCCCCC',
-              fontSize: '0.875rem',
-              '&.Mui-selected': {
-                color: '#FFFFFF',
-                backgroundColor: '#1E1E1E',
-              },
-            },
-            '& .MuiTabs-indicator': {
-              display: 'none',
-            },
-          }}
-        >
-          <Tab label="Query" value="query" />
-          <Tab label="Chat" value="chat" />
-          <Tab label="Graph" value="graph" />
-        </Tabs>
+        <Box sx={{ color: '#E6EDF3', fontSize: '0.875rem', fontWeight: 600 }}>
+          RCA Engine - Query Builder
+        </Box>
       </Box>
       <IconButton
         size="small"

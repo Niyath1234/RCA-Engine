@@ -1,77 +1,60 @@
-import { useState } from 'react';
-import { Box, CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import { ThemeProvider, CssBaseline, Box } from '@mui/material';
+import { theme } from './theme';
 import { TopBar } from './components/TopBar';
-import { ObjectExplorer } from './components/ObjectExplorer';
-import { QueryEditor } from './components/QueryEditor';
-import { ResultsPanel } from './components/ResultsPanel';
-import { ChatPanel } from './components/ChatPanel';
-import { GraphVisualizer } from './components/GraphVisualizer';
-
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    background: {
-      default: '#1E1E1E',
-      paper: '#252526',
-    },
-    text: {
-      primary: '#CCCCCC',
-      secondary: '#858585',
-    },
-  },
-});
+import { Sidebar } from './components/Sidebar';
+import { PipelineManager } from './components/PipelineManager';
+import { ReasoningChat } from './components/ReasoningChat';
+import { Monitoring } from './components/Monitoring';
+import { RulesView } from './components/RulesView';
+import { HypergraphVisualizer } from './components/HypergraphVisualizer';
+import { CursorLikeQueryBuilder } from './components/CursorLikeQueryBuilder';
+import { KnowledgeRegister } from './components/KnowledgeRegister';
+import { MetadataRegister } from './components/MetadataRegister';
+import { useStore } from './store/useStore';
 
 function App() {
-  const [activeView, setActiveView] = useState<'query' | 'chat' | 'graph'>('query');
-  const [queryResult, setQueryResult] = useState<any>(null);
-  const [isExecuting, setIsExecuting] = useState(false);
+  const { sidebarOpen, sidebarWidth, viewMode } = useStore();
 
-  const handleExecuteQuery = async (query: string, mode: string = 'sql') => {
-    console.log('Executing query:', query, 'mode:', mode);
-    setIsExecuting(true);
-    try {
-      const response = await fetch('http://localhost:8080/api/query/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, mode }),
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Query execution failed:', response.status, errorText);
-        setQueryResult({ error: `Query failed: ${response.status} ${errorText}` });
-        return;
-      }
-      
-      const data = await response.json();
-      console.log('Query result:', data);
-      setQueryResult(data);
-    } catch (error) {
-      console.error('Query execution error:', error);
-      setQueryResult({ error: `Failed to execute query: ${error instanceof Error ? error.message : String(error)}` });
-    } finally {
-      setIsExecuting(false);
+  const renderContent = () => {
+    switch (viewMode) {
+      case 'pipelines':
+        return <PipelineManager />;
+      case 'reasoning':
+        return <ReasoningChat />;
+      case 'rules':
+        return <RulesView />;
+      case 'visualizer':
+        return <HypergraphVisualizer />;
+      case 'monitoring':
+        return <Monitoring />;
+      case 'query-regeneration':
+        return <CursorLikeQueryBuilder />;
+      case 'knowledge-register':
+        return <KnowledgeRegister />;
+      case 'metadata-register':
+        return <MetadataRegister />;
+      default:
+        return <CursorLikeQueryBuilder />;
     }
   };
 
   return (
-    <ThemeProvider theme={darkTheme}>
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', backgroundColor: '#1E1E1E' }}>
-        <CssBaseline />
-        <TopBar activeView={activeView} onViewChange={setActiveView} />
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <TopBar />
         <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <ObjectExplorer />
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {activeView === 'query' ? (
-              <>
-                <QueryEditor onExecute={handleExecuteQuery} isExecuting={isExecuting} />
-                <ResultsPanel result={queryResult} />
-              </>
-            ) : activeView === 'chat' ? (
-              <ChatPanel />
-            ) : (
-              <GraphVisualizer />
-            )}
+          {sidebarOpen && <Sidebar width={sidebarWidth} />}
+          <Box
+            sx={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              backgroundColor: '#0D1117',
+            }}
+          >
+            {renderContent()}
           </Box>
         </Box>
       </Box>
