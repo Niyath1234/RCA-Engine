@@ -24,6 +24,7 @@ class PlanningResult:
     error: Optional[str] = None
     error_code: Optional[str] = None
     timestamp: Optional[str] = None
+    clarification_questions: Optional[List[Dict[str, Any]]] = None  # For clarification mode
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -46,13 +47,16 @@ class PlanningResult:
             result['error'] = self.error
         if self.error_code:
             result['error_code'] = self.error_code
+        if self.clarification_questions:
+            result['clarification_questions'] = self.clarification_questions
         return result
 
 
 class PlanningPlane:
     """Handle intent extraction and SQL generation."""
     
-    def __init__(self, multi_step_planner=None, guardrails=None, cache=None):
+    def __init__(self, multi_step_planner=None, guardrails=None, cache=None,
+                 clarification_mode: bool = False, clarification_agent=None):
         """
         Initialize planning plane.
         
@@ -60,10 +64,14 @@ class PlanningPlane:
             multi_step_planner: Multi-step planner instance
             guardrails: Planning guardrails instance
             cache: Cache for intent/planning results
+            clarification_mode: If True, ask clarifying questions for ambiguous queries
+            clarification_agent: Optional ClarificationAgent instance
         """
         self.multi_step_planner = multi_step_planner
         self.guardrails = guardrails
         self.cache = cache
+        self.clarification_mode = clarification_mode
+        self.clarification_agent = clarification_agent
     
     def plan_query(self, user_query: str, context: Dict[str, Any]) -> PlanningResult:
         """
@@ -77,6 +85,35 @@ class PlanningPlane:
             PlanningResult
         """
         planning_id = self._generate_planning_id()
+        
+        # Check for clarification needs (if enabled)
+        if self.clarification_mode and self.clarification_agent:
+            try:
+                from backend.metadata_provider import MetadataProvider
+                metadata = MetadataProvider.load()
+                
+                clarification_result = self.clarification_agent.analyze_query(
+                    user_query, metadata=metadata
+                )
+                
+                if clarification_result.needs_clarification:
+                    return PlanningResult(
+                        success=False,
+                        planning_id=planning_id,
+                        error="Query needs clarification",
+                        error_code="NEEDS_CLARIFICATION",
+                        steps=[{
+                            'step': 'clarification_needed',
+                            'questions': [q.to_dict() for q in clarification_result.questions],
+                            'confidence': clarification_result.confidence,
+                            'suggested_intent': clarification_result.suggested_intent
+                        }],
+                        timestamp=datetime.utcnow().isoformat()
+                    )
+            except Exception as e:
+                # If clarification check fails, log and continue
+                import logging
+                logging.warning(f"Clarification check failed: {e}, proceeding with normal flow")
         
         # Check cache first
         if self.cache:

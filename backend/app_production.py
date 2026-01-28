@@ -387,6 +387,13 @@ def register_blueprints(app: Flask):
     app.register_blueprint(metadata_bp, url_prefix='/api')
     app.register_blueprint(ingestion_bp, url_prefix='/api')
     
+    # Register clarification blueprint
+    try:
+        from backend.api.clarification import clarification_bp
+        app.register_blueprint(clarification_bp)
+    except ImportError:
+        pass  # Clarification module optional
+    
     # Root endpoint
     @app.route('/')
     def root():
@@ -619,7 +626,10 @@ def agent_run():
         # Generate SQL using query generator
         generate_sql_from_query, _ = get_query_generator()
         use_llm = bool(ProductionConfig.OPENAI_API_KEY)
-        result = generate_sql_from_query(user_query, use_llm=use_llm)
+        # Enable clarification mode (can be overridden via request parameter)
+        clarification_mode = request.json.get('clarification_mode', True)
+        result = generate_sql_from_query(user_query, use_llm=use_llm, 
+                                        clarification_mode=clarification_mode)
         
         duration_ms = (time.time() - start_time) * 1000
         metrics_collector.record_planning(duration_ms)
@@ -645,7 +655,22 @@ def agent_run():
                 'final_answer': result['sql'],
                 'trace': result.get('reasoning_steps', []),
             })
+        elif result.get('needs_clarification'):
+            # Handle proactive clarification response
+            clarification = result.get('clarification', {})
+            return jsonify({
+                'status': 'needs_clarification',
+                'message': clarification.get('message', 'Query needs clarification'),
+                'confidence': result.get('confidence', 0.5),
+                'query': user_query,
+                'clarification': {
+                    'questions': clarification.get('questions', []),
+                    'message': clarification.get('message', 'I need more information'),
+                },
+                'suggested_intent': result.get('suggested_intent'),
+            })
         else:
+            # Fallback for other error cases
             return jsonify({
                 'status': 'needs_clarification',
                 'message': result.get('error', 'Query needs clarification'),

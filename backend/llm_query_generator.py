@@ -820,6 +820,17 @@ CRITICAL INSTRUCTIONS:
 - Apply business rules - ensure generated SQL complies with all business rules
 - Distinguish between relational queries (individual records) and metric queries (aggregations)
 
+HANDLING VAGUE/AMBIGUOUS QUERIES (Cursor-like behavior):
+- When a query is vague or ambiguous, MAKE REASONABLE ASSUMPTIONS rather than failing
+- Use context clues from the query to infer intent (e.g., "show me customers" → likely wants customer table)
+- If metric is not specified but query mentions aggregation keywords ("total", "sum", "count"), infer it's a metric query
+- If time range is missing, infer from context or use a reasonable default (e.g., "last 30 days" for recent data)
+- If table is ambiguous, choose the most relevant table based on query keywords and descriptions
+- If column is ambiguous, choose the most commonly used column or the one matching the query intent
+- Document your assumptions in the "reasoning" field so users understand what was inferred
+- Only fail if the query is truly impossible to interpret (e.g., no tables match, completely unclear intent)
+- Prefer to generate something reasonable with warnings rather than rejecting the query
+
 QUERY TYPE DETECTION:
 - If query asks for "total", "sum", "count", "average", "aggregate", or mentions a metric name → METRIC query
 - If query asks for individual records, rows, or "show me all" without aggregation → RELATIONAL query

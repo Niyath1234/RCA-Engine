@@ -50,10 +50,65 @@ except ImportError as e:
     def find_table_by_query(tables: Dict[str, Any], query: str) -> Any:
         return None
 
-def generate_sql_from_query(query: str, use_llm: bool = True) -> dict:
-    """Generate SQL from natural language query using LLM with comprehensive context."""
+def generate_sql_from_query(query: str, use_llm: bool = True, 
+                            clarification_mode: bool = True) -> dict:
+    """
+    Generate SQL from natural language query using LLM with comprehensive context.
+    
+    Args:
+        query: User query text
+        use_llm: Whether to use LLM for generation
+        clarification_mode: If True, ask clarifying questions for ambiguous queries
+    
+    Returns:
+        Dictionary with SQL result or clarification questions
+    """
     try:
-        # Try LLM-based generation first (with full context)
+        # Step 1: Check for clarification needs (if enabled)
+        if clarification_mode:
+            try:
+                from backend.planning.clarification_agent import ClarificationAgent
+                from backend.metadata_provider import MetadataProvider
+                from backend.interfaces import LLMProvider
+                
+                metadata = MetadataProvider.load()
+                
+                # Try to get LLM provider if available
+                llm_provider = None
+                if use_llm:
+                    try:
+                        from backend.implementations.llm_provider import OpenAIProvider
+                        llm_provider = OpenAIProvider()
+                    except:
+                        pass  # LLM not available, use rule-based questions
+                
+                clarification_agent = ClarificationAgent(
+                    llm_provider=llm_provider,
+                    metadata=metadata
+                )
+                
+                # Analyze query for ambiguities
+                clarification_result = clarification_agent.analyze_query(query, metadata=metadata)
+                
+                if clarification_result.needs_clarification:
+                    # Return clarification response
+                    return {
+                        "success": False,
+                        "needs_clarification": True,
+                        "confidence": clarification_result.confidence,
+                        "query": query,
+                        "clarification": {
+                            "message": f"I need a bit more information to understand your query. Please answer these {len(clarification_result.questions)} question(s):",
+                            "questions": [q.to_dict() for q in clarification_result.questions]
+                        },
+                        "suggested_intent": clarification_result.suggested_intent
+                    }
+            except Exception as e:
+                # If clarification check fails, log and continue
+                import logging
+                logging.warning(f"Clarification check failed: {e}, proceeding with normal flow")
+        
+        # Step 2: Try LLM-based generation first (with full context)
         if use_llm:
             try:
                 from backend.llm_query_generator import generate_sql_with_llm
